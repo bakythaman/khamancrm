@@ -1,0 +1,319 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MANAGER
+  VIEWER
+}
+
+enum DealStatus {
+  OPEN
+  WON
+  LOST
+}
+
+enum ContactSource {
+  WHATSAPP
+  PHONE
+  WEBSITE
+  REFERRAL
+  MANUAL
+}
+
+enum ConversationStatus {
+  OPEN
+  WAITING
+  RESOLVED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CallStatus {
+  QUEUED
+  RINGING
+  ANSWERED
+  MISSED
+  FAILED
+  COMPLETED
+}
+
+enum TaskStatus {
+  OPEN
+  DONE
+  CANCELED
+}
+
+enum IntegrationProvider {
+  WHATSAPP
+  TELEPHONY
+  OPENAI
+}
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  timezone    String   @default("Europe/Rome")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  users       User[]
+  pipelines   Pipeline[]
+  contacts    Contact[]
+  deals       Deal[]
+  chats       Conversation[]
+  tasks       Task[]
+  integrations IntegrationAccount[]
+  auditLogs   AuditLog[]
+}
+
+model User {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  email          String       @unique
+  passwordHash   String
+  role           UserRole     @default(MANAGER)
+  avatarUrl      String?
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  ownedDeals     Deal[]       @relation("DealOwner")
+  assignedChats  Conversation[] @relation("ConversationOwner")
+  tasks          Task[]       @relation("TaskOwner")
+  calls          Call[]       @relation("CallOwner")
+  messages       Message[]    @relation("MessageSender")
+
+  @@index([organizationId, role])
+}
+
+model Pipeline {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  stages         PipelineStage[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+}
+
+model PipelineStage {
+  id         String   @id @default(cuid())
+  pipelineId String
+  pipeline   Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  name       String
+  color      String   @default("neutral")
+  sortOrder  Int
+  deals      Deal[]
+
+  @@unique([pipelineId, sortOrder])
+}
+
+model Contact {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  phone          String
+  email          String?
+  company        String?
+  source         ContactSource @default(MANUAL)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  deals          Deal[]
+  conversations  Conversation[]
+  calls          Call[]
+  tasks          Task[]
+
+  @@unique([organizationId, phone])
+  @@index([organizationId, name])
+}
+
+model Deal {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contactId      String
+  contact        Contact       @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  ownerId        String
+  owner          User          @relation("DealOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  stageId        String
+  stage          PipelineStage @relation(fields: [stageId], references: [id], onDelete: Restrict)
+  title          String
+  valueCents     Int           @default(0)
+  currency       String        @default("USD")
+  status         DealStatus    @default(OPEN)
+  lostReason     String?
+  nextStep       String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  tasks          Task[]
+  calls          Call[]
+  aiNotes        AiNote[]
+
+  @@index([organizationId, status])
+  @@index([stageId, updatedAt])
+  @@index([ownerId, updatedAt])
+}
+
+model Conversation {
+  id             String             @id @default(cuid())
+  organizationId String
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contactId      String
+  contact        Contact            @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  ownerId        String?
+  owner          User?              @relation("ConversationOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  status         ConversationStatus @default(OPEN)
+  unreadCount    Int                @default(0)
+  lastMessageAt  DateTime?
+  externalChatId String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  messages       Message[]
+  tags           ConversationTag[]
+  aiNotes        AiNote[]
+
+  @@index([organizationId, status, lastMessageAt])
+  @@index([ownerId, status])
+}
+
+model Message {
+  id             String           @id @default(cuid())
+  conversationId String
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String?
+  sender         User?            @relation("MessageSender", fields: [senderId], references: [id], onDelete: SetNull)
+  direction      MessageDirection
+  body           String
+  externalId     String?
+  createdAt      DateTime         @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+model ChatTag {
+  id             String            @id @default(cuid())
+  organizationId String
+  name           String
+  color          String            @default("neutral")
+  conversations  ConversationTag[]
+
+  @@unique([organizationId, name])
+}
+
+model ConversationTag {
+  conversationId String
+  tagId          String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  tag            ChatTag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, tagId])
+}
+
+model Call {
+  id             String        @id @default(cuid())
+  organizationId String
+  contactId      String
+  contact        Contact       @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  dealId         String?
+  deal           Deal?         @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  ownerId        String?
+  owner          User?         @relation("CallOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  direction      CallDirection
+  status         CallStatus    @default(QUEUED)
+  durationSec    Int           @default(0)
+  recordingUrl   String?
+  transcription  String?
+  startedAt      DateTime      @default(now())
+  endedAt        DateTime?
+  aiNotes        AiNote[]
+
+  @@index([organizationId, startedAt])
+  @@index([ownerId, startedAt])
+}
+
+model Task {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ownerId        String
+  owner          User         @relation("TaskOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  contactId      String?
+  contact        Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  dealId         String?
+  deal           Deal?        @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  title          String
+  dueAt          DateTime
+  status         TaskStatus   @default(OPEN)
+  completedAt    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, status, dueAt])
+  @@index([ownerId, status, dueAt])
+}
+
+model AiNote {
+  id             String        @id @default(cuid())
+  organizationId String
+  dealId         String?
+  deal           Deal?         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  callId         String?
+  call           Call?         @relation(fields: [callId], references: [id], onDelete: Cascade)
+  title          String
+  summary        String
+  actionItems    Json          @default("[]")
+  createdAt      DateTime      @default(now())
+
+  @@index([organizationId, createdAt])
+}
+
+model IntegrationAccount {
+  id             String              @id @default(cuid())
+  organizationId String
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  provider       IntegrationProvider
+  displayName    String
+  externalId     String?
+  accessTokenRef String?
+  active         Boolean             @default(false)
+  metadata       Json                @default("{}")
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@unique([organizationId, provider, displayName])
+}
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actorId        String?
+  action         String
+  entityType     String
+  entityId       String
+  metadata       Json         @default("{}")
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, createdAt])
+}

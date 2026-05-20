@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 0 0% 99%;
+  --foreground: 0 0% 8%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 8%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 42%;
+  --border: 0 0% 89%;
+  --primary: 151 72% 35%;
+  --primary-foreground: 0 0% 100%;
+}
+
+* {
+  box-sizing: border-box;
+  border-color: hsl(var(--border));
+}
+
+html {
+  min-height: 100%;
+  background: hsl(var(--background));
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
+  font-feature-settings:
+    "rlig" 1,
+    "calt" 1;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(25, 135, 84, 0.18);
+}
+
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #d4d4d4 transparent;
+}
+
+.thin-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: #d4d4d4;
+  border-radius: 8px;
+}
