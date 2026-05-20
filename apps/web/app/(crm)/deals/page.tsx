@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Bot, CalendarClock, CheckCircle2, Edit3, MessageCircle, Phone, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { DealFormModal } from '@/components/forms/deal-form-modal';
@@ -23,7 +23,7 @@ import type { DealStatus } from '@/lib/storage/types';
 
 export default function DealDetailsPage() {
   const router = useRouter();
-  const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const { currentUser } = useAuth();
   const { deals, tasks, teamMembers, pipelineStages, roles, updateDeal, deleteDeal, addComment, createTask } = useCrmData();
   const { confirm } = useConfirm();
@@ -32,7 +32,7 @@ export default function DealDetailsPage() {
   const [comment, setComment] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
-  const deal = deals.find((item) => item.id === params.id);
+  const deal = deals.find((item) => item.id === searchParams.get('id'));
 
   if (!deal) {
     return (

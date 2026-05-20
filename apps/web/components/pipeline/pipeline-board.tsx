@@ -162,7 +162,7 @@ export function PipelineBoard({ filters }: { filters: PipelineFilters }) {
                             <GripVertical className="mt-1 h-4 w-4 shrink-0 text-neutral-300" aria-hidden />
                             <div className="min-w-0 flex-1">
                               <Link
-                                href={`/deals/${deal.id}`}
+                                href={`/deals?id=${encodeURIComponent(deal.id)}`}
                                 className="line-clamp-2 text-sm font-semibold text-neutral-950 hover:text-emerald-700"
                               >
                                 {deal.title}

@@ -188,7 +188,7 @@ export function TaskList({ filters }: { filters: TaskListFilters }) {
             </div>
             {selectedTask.dealId ? (
               <Button variant="outline" asChild>
-                <Link href={`/deals/${selectedTask.dealId}`}>{t('tasks.openDeal')}</Link>
+                <Link href={`/deals?id=${encodeURIComponent(selectedTask.dealId)}`}>{t('tasks.openDeal')}</Link>
               </Button>
             ) : null}
             <div className="flex flex-wrap justify-end gap-2">

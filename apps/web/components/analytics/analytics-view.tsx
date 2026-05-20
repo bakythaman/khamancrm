@@ -143,7 +143,7 @@ export function AnalyticsView({ period, managerId }: { period: AnalyticsPeriod; 
                 <h4 className="mb-2 text-sm font-semibold text-neutral-950">{t('analytics.latestDeals')}</h4>
                 <div className="space-y-2">
                   {selectedManager.deals.slice(0, 4).map((deal) => (
-                    <Link key={deal.id} href={`/deals/${deal.id}`} className="block rounded-lg border bg-white p-3 text-sm hover:bg-neutral-50">
+                    <Link key={deal.id} href={`/deals?id=${encodeURIComponent(deal.id)}`} className="block rounded-lg border bg-white p-3 text-sm hover:bg-neutral-50">
                       <span className="font-medium text-neutral-950">{deal.title}</span>
                       <span className="mt-1 block text-neutral-500">{formatAmount(deal.amount)}</span>
                     </Link>
