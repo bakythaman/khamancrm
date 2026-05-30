@@ -198,7 +198,7 @@ export default function DealDetailsPage() {
                   const author = teamMembers.find((member) => member.id === item.authorId);
                   return (
                     <div key={item.id} className="flex gap-3 rounded-lg border bg-white p-3">
-                      <Avatar name={author?.name ?? 'Khaman'} className="h-8 w-8 text-[11px]" />
+                      <Avatar name={author?.name ?? 'Khaman'} src={author?.avatarDataUrl} className="h-8 w-8 text-[11px]" />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-3">
                           <p className="text-sm font-semibold text-neutral-950">{author?.name ?? 'Khaman'}</p>

@@ -28,6 +28,7 @@ const managerPermissions: Permission[] = [
   'view_tasks',
   'create_task',
   'edit_task',
+  'view_team',
   'view_settings',
 ];
 

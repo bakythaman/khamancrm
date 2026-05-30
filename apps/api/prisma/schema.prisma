@@ -87,6 +87,7 @@ model User {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
   email          String       @unique
+  phone          String       @default("")
   passwordHash   String
   role           UserRole     @default(MANAGER)
   avatarUrl      String?
@@ -98,8 +99,21 @@ model User {
   tasks          Task[]       @relation("TaskOwner")
   calls          Call[]       @relation("CallOwner")
   messages       Message[]    @relation("MessageSender")
+  passwordResetCodes PasswordResetCode[]
 
   @@index([organizationId, role])
+}
+
+model PasswordResetCode {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, expiresAt])
 }
 
 model Pipeline {

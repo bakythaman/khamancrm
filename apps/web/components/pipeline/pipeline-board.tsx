@@ -174,7 +174,7 @@ export function PipelineBoard({ filters }: { filters: PipelineFilters }) {
 
                           <div className="mt-3 flex items-center justify-between gap-3">
                             <p className="min-w-0 truncate text-lg font-semibold text-neutral-950">{formatAmount(deal.amount)}</p>
-                            <Avatar name={owner?.name ?? deal.clientName} className="h-7 w-7 shrink-0 text-[11px]" />
+                            <Avatar name={owner?.name ?? deal.clientName} src={owner?.avatarDataUrl} className="h-7 w-7 shrink-0 text-[11px]" />
                           </div>
 
                           <div className="mt-3 flex items-center justify-between gap-2">

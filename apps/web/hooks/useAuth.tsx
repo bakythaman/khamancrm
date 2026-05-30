@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { apiRequest, isApiEnabled } from '@/lib/api/client';
 import { hashPassword } from '@/lib/auth/password';
 import { storageKeys } from '@/lib/storage/keys';
 import { readJson, readString, removeItem, writeJson, writeString } from '@/lib/storage/local-store';
@@ -14,18 +15,51 @@ interface AuthContextValue {
   loading: boolean;
   register: (payload: RegisterPayload) => Promise<void>;
   login: (payload: LoginPayload) => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<void>;
+  resetPassword: (payload: { email: string; code: string; password: string }) => Promise<void>;
   logout: () => void;
-  updateProfile: (payload: Pick<User, 'name' | 'email' | 'phone'>) => void;
+  updateProfile: (payload: Pick<User, 'name' | 'email' | 'phone'> & Partial<Pick<User, 'avatarDataUrl'>>) => void;
   updateCompany: (name: string) => void;
   updateLanguage: (language: Language) => void;
   createCompanyUser: (payload: TeamMemberPayload) => Promise<User>;
-  updateCompanyUser: (id: string, payload: Partial<Pick<User, 'name' | 'email' | 'phone' | 'role' | 'active'>>) => void;
+  updateCompanyUser: (id: string, payload: Partial<Pick<User, 'name' | 'email' | 'phone' | 'role' | 'active' | 'avatarDataUrl'>>) => void;
   deleteCompanyUser: (id: string) => void;
   emailExists: (email: string, exceptUserId?: string) => boolean;
   canManageCompany: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+interface ApiAuthResponse {
+  accessToken: string;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    phone?: string;
+    role: string;
+    avatarUrl?: string | null;
+    organization?: string;
+    organizationId?: string;
+  };
+  organization?: {
+    id: string;
+    name: string;
+  };
+}
+
+interface ApiMeResponse {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  role: string;
+  avatarUrl?: string | null;
+  organization: {
+    id: string;
+    name: string;
+  };
+}
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
@@ -37,6 +71,38 @@ function readUsers() {
 
 function readCompanies() {
   return readJson<Company[]>(storageKeys.companies, []);
+}
+
+function mapApiUser(payload: ApiAuthResponse | ApiMeResponse): { user: User; company: Company } {
+  const apiUser = 'user' in payload ? payload.user : payload;
+  const organization =
+    'user' in payload
+      ? (payload.organization ?? {
+          id: payload.user.organizationId ?? 'api-company',
+          name: payload.user.organization ?? 'Khaman CRM',
+        })
+      : payload.organization;
+  const company: Company = {
+    id: organization.id,
+    name: organization.name,
+    createdAt: new Date().toISOString(),
+  };
+  const role = apiUser.role.toLowerCase();
+  return {
+    company,
+    user: {
+      id: apiUser.id,
+      name: apiUser.name,
+      email: normalizeEmail(apiUser.email),
+      phone: apiUser.phone ?? '',
+      role,
+      companyId: company.id,
+      language: readString(storageKeys.language) === 'kz' ? 'kz' : 'ru',
+      passwordHash: '',
+      active: true,
+      avatarDataUrl: apiUser.avatarUrl ?? undefined,
+    },
+  };
 }
 
 function normalizeUser(user: User): User {
@@ -54,6 +120,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (isApiEnabled()) {
+      const token = readString(storageKeys.apiToken);
+      if (token) {
+        void apiRequest<ApiMeResponse>('/auth/me')
+          .then((payload) => {
+            const mapped = mapApiUser(payload);
+            setCurrentUser(mapped.user);
+            setCompany(mapped.company);
+            setLanguage(mapped.user.language);
+          })
+          .catch(() => {
+            removeItem(storageKeys.apiToken);
+          })
+          .finally(() => setLoading(false));
+        return;
+      }
+    }
+
     const sessionUserId = readString(storageKeys.sessionUserId);
     const user = readUsers().map(normalizeUser).find((item) => item.id === sessionUserId) ?? null;
     const userCompany = user ? readCompanies().find((item) => item.id === user.companyId) ?? null : null;
@@ -68,6 +152,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const register = useCallback(
     async (payload: RegisterPayload) => {
+      if (isApiEnabled()) {
+        const response = await apiRequest<ApiAuthResponse>('/auth/register', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        writeString(storageKeys.apiToken, response.accessToken);
+        const mapped = mapApiUser(response);
+        setCurrentUser(mapped.user);
+        setCompany(mapped.company);
+        setLanguage(mapped.user.language);
+        return;
+      }
+
       const email = normalizeEmail(payload.email);
       const users = readUsers();
 
@@ -110,6 +207,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(
     async (payload: LoginPayload) => {
+      if (isApiEnabled()) {
+        const response = await apiRequest<ApiAuthResponse>('/auth/login', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        writeString(storageKeys.apiToken, response.accessToken);
+        const mapped = mapApiUser(response);
+        setCurrentUser(mapped.user);
+        setCompany(mapped.company);
+        setLanguage(mapped.user.language);
+        return;
+      }
+
       const email = normalizeEmail(payload.email);
       const user = readUsers().map(normalizeUser).find((item) => item.email === email);
       const passwordHash = await hashPassword(payload.password);
@@ -133,8 +243,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(() => {
     removeItem(storageKeys.sessionUserId);
+    removeItem(storageKeys.apiToken);
     setCurrentUser(null);
     setCompany(null);
+  }, []);
+
+  const requestPasswordReset = useCallback(async (email: string) => {
+    if (!isApiEnabled()) {
+      throw new Error('auth.apiRequired');
+    }
+    await apiRequest('/auth/request-password-reset', {
+      method: 'POST',
+      body: JSON.stringify({ email: normalizeEmail(email) }),
+    });
+  }, []);
+
+  const resetPassword = useCallback(async (payload: { email: string; code: string; password: string }) => {
+    if (!isApiEnabled()) {
+      throw new Error('auth.apiRequired');
+    }
+    await apiRequest('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: normalizeEmail(payload.email),
+        code: payload.code.trim(),
+        password: payload.password,
+      }),
+    });
   }, []);
 
   const emailExists = useCallback((email: string, exceptUserId?: string) => {
@@ -142,7 +277,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return readUsers().some((user) => user.email === normalized && user.id !== exceptUserId);
   }, []);
 
-  const updateProfile = useCallback((payload: Pick<User, 'name' | 'email' | 'phone'>) => {
+  const updateProfile = useCallback((payload: Pick<User, 'name' | 'email' | 'phone'> & Partial<Pick<User, 'avatarDataUrl'>>) => {
     setCurrentUser((user) => {
       if (!user) return user;
       const nextUser = {
@@ -150,11 +285,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         name: payload.name.trim(),
         email: normalizeEmail(payload.email),
         phone: payload.phone.trim(),
+        avatarDataUrl: payload.avatarDataUrl ?? user.avatarDataUrl,
       };
       writeJson(
         storageKeys.users,
         readUsers().map((item) => (item.id === nextUser.id ? nextUser : item)),
       );
+      if (isApiEnabled()) {
+        void apiRequest('/auth/me', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            name: nextUser.name,
+            email: nextUser.email,
+            phone: nextUser.phone,
+            avatarUrl: nextUser.avatarDataUrl,
+          }),
+        });
+      }
       return nextUser;
     });
   }, []);
@@ -191,6 +338,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (payload: TeamMemberPayload) => {
       if (!currentUser) throw new Error('validation.required');
       const email = normalizeEmail(payload.email);
+
+      if (isApiEnabled()) {
+        const user = await apiRequest<{
+          id: string;
+          name: string;
+          email: string;
+          phone?: string;
+          role: string;
+          active: boolean;
+          avatarUrl?: string | null;
+        }>('/users/invite', {
+          method: 'POST',
+          body: JSON.stringify({
+            ...payload,
+            email,
+            role: ['owner', 'admin', 'manager'].includes(payload.role) ? payload.role.toUpperCase() : 'MANAGER',
+          }),
+        });
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone ?? payload.phone,
+          role: user.role.toLowerCase(),
+          companyId: currentUser.companyId,
+          language: currentUser.language,
+          passwordHash: '',
+          active: user.active,
+          avatarDataUrl: user.avatarUrl ?? undefined,
+        };
+      }
+
       const users = readUsers();
 
       if (users.some((user) => user.email === email)) {
@@ -215,6 +394,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         language: currentUser.language,
         passwordHash: await hashPassword(payload.password),
         active: true,
+        avatarDataUrl: payload.avatarDataUrl,
       };
 
       writeJson(storageKeys.users, [...users, user]);
@@ -224,7 +404,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateCompanyUser = useCallback(
-    (id: string, payload: Partial<Pick<User, 'name' | 'email' | 'phone' | 'role' | 'active'>>) => {
+    (id: string, payload: Partial<Pick<User, 'name' | 'email' | 'phone' | 'role' | 'active' | 'avatarDataUrl'>>) => {
       const users = readUsers().map((user) =>
         user.id === id
           ? {
@@ -237,6 +417,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           : user,
       );
       writeJson(storageKeys.users, users);
+      if (isApiEnabled()) {
+        void apiRequest(`/users/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            ...payload,
+            role: payload.role && ['owner', 'admin', 'manager'].includes(payload.role) ? payload.role.toUpperCase() : undefined,
+            avatarUrl: payload.avatarDataUrl,
+          }),
+        });
+      }
       setCurrentUser((user) => (user?.id === id ? normalizeUser(users.find((item) => item.id === id) ?? user) : user));
     },
     [],
@@ -256,6 +446,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loading,
       register,
       login,
+      requestPasswordReset,
+      resetPassword,
       logout,
       updateProfile,
       updateCompany,
@@ -276,6 +468,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login,
       logout,
       register,
+      requestPasswordReset,
+      resetPassword,
       updateCompany,
       updateCompanyUser,
       updateLanguage,

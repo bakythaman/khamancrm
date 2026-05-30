@@ -1,5 +1,5 @@
 import { createDefaultRoles } from '@/lib/permissions';
-import type { CompanyData, Deal, PipelineStage, TeamMember, User } from '@/lib/storage/types';
+import type { CompanyData, Deal, PipelineAutomation, PipelineStage, TeamMember, User } from '@/lib/storage/types';
 
 const now = () => new Date().toISOString();
 
@@ -24,6 +24,38 @@ export function createDefaultSettings() {
   };
 }
 
+export function createDefaultPipelineAutomations(createdAt = now()): PipelineAutomation[] {
+  return [
+    {
+      id: crypto.randomUUID(),
+      type: 'robot',
+      name: 'Задача после нового лида',
+      stageId: 'new',
+      message: 'Создать задачу ответственному менеджеру через 15 минут после появления нового лида.',
+      enabled: true,
+      createdAt,
+    },
+    {
+      id: crypto.randomUUID(),
+      type: 'trigger',
+      name: 'Триггер при выигрыше сделки',
+      stageId: 'won',
+      message: 'Показать уведомление руководителю, когда сделка перешла в выигранные.',
+      enabled: true,
+      createdAt,
+    },
+    {
+      id: crypto.randomUUID(),
+      type: 'broadcast',
+      name: 'Рассылка по потерянным лидам',
+      stageId: 'lost',
+      message: 'Подготовить мягкое сообщение для повторного контакта через 7 дней.',
+      enabled: false,
+      createdAt,
+    },
+  ];
+}
+
 export function createEmptyCompanyData(owner: User): CompanyData {
   const ownerMember: TeamMember = {
     id: owner.id,
@@ -32,6 +64,7 @@ export function createEmptyCompanyData(owner: User): CompanyData {
     phone: owner.phone,
     role: owner.role,
     status: 'active',
+    avatarDataUrl: owner.avatarDataUrl,
   };
 
   return {
@@ -39,6 +72,8 @@ export function createEmptyCompanyData(owner: User): CompanyData {
     tasks: [],
     teamMembers: [ownerMember],
     pipelineStages: createDefaultPipelineStages(),
+    pipelineAutomations: createDefaultPipelineAutomations(),
+    teamMessages: [],
     roles: createDefaultRoles(),
     settings: createDefaultSettings(),
   };
@@ -111,10 +146,13 @@ export function createDemoCompanyData(owner: User): CompanyData {
         phone: owner.phone,
         role: owner.role,
         status: 'active',
+        avatarDataUrl: owner.avatarDataUrl,
       },
       manager,
     ],
     pipelineStages: createDefaultPipelineStages(),
+    pipelineAutomations: createDefaultPipelineAutomations(),
+    teamMessages: [],
     roles: createDefaultRoles(),
     settings: createDefaultSettings(),
   };

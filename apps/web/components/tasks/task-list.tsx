@@ -152,7 +152,7 @@ export function TaskList({ filters }: { filters: TaskListFilters }) {
                   </div>
                 </button>
                 <div className="flex shrink-0 items-center gap-2">
-                  <Avatar name={assignee?.name ?? 'Khaman'} className="h-7 w-7 text-[11px]" />
+                  <Avatar name={assignee?.name ?? 'Khaman'} src={assignee?.avatarDataUrl} className="h-7 w-7 text-[11px]" />
                   {canEditTask ? (
                     <Button variant="ghost" size="icon" title={t('common.edit')} onClick={() => setEditingTask(task)}>
                       <Edit3 className="h-4 w-4" aria-hidden />

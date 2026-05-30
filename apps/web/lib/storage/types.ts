@@ -39,6 +39,7 @@ export interface User {
   language: Language;
   passwordHash: string;
   active?: boolean;
+  avatarDataUrl?: string;
 }
 
 export interface Company {
@@ -69,6 +70,18 @@ export interface CompanySettings {
   notificationPermission?: NotificationPermission | 'unsupported';
   logoDataUrl?: string;
   automation: boolean[];
+}
+
+export type PipelineAutomationType = 'robot' | 'trigger' | 'broadcast';
+
+export interface PipelineAutomation {
+  id: string;
+  type: PipelineAutomationType;
+  name: string;
+  stageId: string;
+  message: string;
+  enabled: boolean;
+  createdAt: string;
 }
 
 export interface DealComment {
@@ -112,6 +125,15 @@ export interface TeamMember {
   phone: string;
   role: UserRole;
   status: TeamStatus;
+  avatarDataUrl?: string;
+}
+
+export interface TeamMessage {
+  id: string;
+  authorId: string;
+  text: string;
+  taskId?: string;
+  createdAt: string;
 }
 
 export interface CompanyData {
@@ -119,6 +141,8 @@ export interface CompanyData {
   tasks: CrmTask[];
   teamMembers: TeamMember[];
   pipelineStages: PipelineStage[];
+  pipelineAutomations: PipelineAutomation[];
+  teamMessages: TeamMessage[];
   roles: RoleDefinition[];
   settings: CompanySettings;
 }
@@ -162,4 +186,5 @@ export interface TeamMemberPayload {
   role: UserRole;
   password?: string;
   confirmPassword?: string;
+  avatarDataUrl?: string;
 }

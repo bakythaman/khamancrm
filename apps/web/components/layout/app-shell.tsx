@@ -156,15 +156,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Button>
           <Link
             href={hasPermission(currentUser, roles, 'view_team') ? '/team' : '/settings'}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-900 text-xs font-semibold text-white"
+            className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-neutral-900 text-xs font-semibold text-white"
             title={hasPermission(currentUser, roles, 'view_team') ? t('navigation.team') : t('settings.profile')}
           >
-            {currentUser?.name
-              .split(' ')
-              .map((part) => part[0])
-              .join('')
-              .slice(0, 2)
-              .toUpperCase() ?? 'K'}
+            {currentUser?.avatarDataUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={currentUser.avatarDataUrl} alt={currentUser.name} className="h-full w-full object-cover" />
+            ) : (
+              currentUser?.name
+                .split(' ')
+                .map((part) => part[0])
+                .join('')
+                .slice(0, 2)
+                .toUpperCase() ?? 'K'
+            )}
           </Link>
         </header>
         <main className="mx-auto w-full max-w-[1440px] p-4 md:p-6">{children}</main>

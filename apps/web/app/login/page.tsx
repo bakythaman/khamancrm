@@ -13,13 +13,16 @@ import { useTranslation } from '@/hooks/useTranslation';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { currentUser, login } = useAuth();
+  const { currentUser, login, requestPasswordReset, resetPassword } = useAuth();
   const { showToast } = useToast();
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [nextPath, setNextPath] = useState('/dashboard');
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetStep, setResetStep] = useState<'email' | 'code'>('email');
   const [form, setForm] = useState({ email: '', password: '' });
+  const [resetForm, setResetForm] = useState({ email: '', code: '', password: '', confirmPassword: '' });
 
   useEffect(() => {
     if (currentUser) router.replace('/dashboard');
@@ -49,6 +52,46 @@ export default function LoginPage() {
       router.push(nextPath);
     } catch (caught) {
       const key = caught instanceof Error ? caught.message : 'validation.invalidCredentials';
+      setError(t(key));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submitReset(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError('');
+    try {
+      setLoading(true);
+      if (resetStep === 'email') {
+        if (!resetForm.email.includes('@')) {
+          setError(t('validation.invalidEmail'));
+          return;
+        }
+        await requestPasswordReset(resetForm.email);
+        setResetStep('code');
+        showToast(t('auth.codeSent'));
+        return;
+      }
+      if (!resetForm.code.trim() || !resetForm.password || !resetForm.confirmPassword) {
+        setError(t('validation.required'));
+        return;
+      }
+      if (resetForm.password.length < 6) {
+        setError(t('validation.passwordMin'));
+        return;
+      }
+      if (resetForm.password !== resetForm.confirmPassword) {
+        setError(t('validation.passwordMismatch'));
+        return;
+      }
+      await resetPassword({ email: resetForm.email, code: resetForm.code, password: resetForm.password });
+      setResetOpen(false);
+      setResetStep('email');
+      setForm((current) => ({ ...current, email: resetForm.email }));
+      showToast(t('auth.passwordChanged'));
+    } catch (caught) {
+      const key = caught instanceof Error ? caught.message : 'validation.invalidCode';
       setError(t(key));
     } finally {
       setLoading(false);
@@ -93,6 +136,53 @@ export default function LoginPage() {
             {loading ? t('common.loading') : t('buttons.login')}
           </Button>
         </form>
+
+        <button
+          className="mt-3 w-full text-center text-sm font-medium text-emerald-700 hover:text-emerald-800"
+          onClick={() => {
+            setResetOpen((current) => !current);
+            setResetForm((current) => ({ ...current, email: form.email || current.email }));
+          }}
+        >
+          {t('auth.forgotPassword')}
+        </button>
+
+        {resetOpen ? (
+          <form className="mt-4 space-y-3 rounded-lg border bg-neutral-50 p-3" onSubmit={submitReset}>
+            <p className="text-sm font-semibold text-neutral-950">{t('auth.resetPassword')}</p>
+            <Input
+              type="email"
+              value={resetForm.email}
+              onChange={(event) => setResetForm({ ...resetForm, email: event.target.value })}
+              placeholder={t('common.email')}
+              disabled={resetStep === 'code'}
+            />
+            {resetStep === 'code' ? (
+              <>
+                <Input
+                  value={resetForm.code}
+                  onChange={(event) => setResetForm({ ...resetForm, code: event.target.value })}
+                  placeholder={t('auth.resetCode')}
+                />
+                <Input
+                  type="password"
+                  value={resetForm.password}
+                  onChange={(event) => setResetForm({ ...resetForm, password: event.target.value })}
+                  placeholder={t('auth.newPassword')}
+                />
+                <Input
+                  type="password"
+                  value={resetForm.confirmPassword}
+                  onChange={(event) => setResetForm({ ...resetForm, confirmPassword: event.target.value })}
+                  placeholder={t('auth.confirmPassword')}
+                />
+              </>
+            ) : null}
+            <Button className="w-full" disabled={loading}>
+              {resetStep === 'email' ? t('auth.sendCode') : t('buttons.saveChanges')}
+            </Button>
+          </form>
+        ) : null}
 
         <div className="mt-5 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">{t('auth.demoNote')}</div>
         <p className="mt-4 text-center text-sm text-neutral-500">
