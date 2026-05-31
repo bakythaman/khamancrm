@@ -9,12 +9,13 @@ import {
   Inbox,
   LayoutDashboard,
   Menu,
-  PanelLeftClose,
-  Phone,
-  Search,
-  Settings,
-  Users,
-  Workflow,
+	  PanelLeftClose,
+	  Phone,
+	  Search,
+	  Settings,
+	  ShieldCheck,
+	  Users,
+	  Workflow,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -32,9 +33,10 @@ const navItems = [
   { labelKey: 'navigation.pipeline', href: '/pipeline', icon: Workflow, permission: 'view_pipeline' },
   { labelKey: 'navigation.inbox', href: '/inbox', icon: Inbox, permission: 'view_pipeline' },
   { labelKey: 'navigation.tasks', href: '/tasks', icon: CheckSquare, permission: 'view_tasks' },
-  { labelKey: 'navigation.analytics', href: '/analytics', icon: BarChart3, permission: 'view_analytics' },
-  { labelKey: 'navigation.team', href: '/team', icon: Users, permission: 'view_team' },
-  { labelKey: 'navigation.settings', href: '/settings', icon: Settings, permission: 'view_settings' },
+	  { labelKey: 'navigation.analytics', href: '/analytics', icon: BarChart3, permission: 'view_analytics' },
+	  { labelKey: 'navigation.team', href: '/team', icon: Users, permission: 'view_team' },
+	  { labelKey: 'navigation.admin', href: '/admin', icon: ShieldCheck, permission: 'view_admin' },
+	  { labelKey: 'navigation.settings', href: '/settings', icon: Settings, permission: 'view_settings' },
 ] as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {

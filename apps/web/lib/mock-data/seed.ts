@@ -1,9 +1,15 @@
 import { createDefaultRoles } from '@/lib/permissions';
-import type { CompanyData, Deal, PipelineAutomation, PipelineStage, TeamMember, User } from '@/lib/storage/types';
+import type { CompanyData, Deal, PipelineAutomation, PipelineStage, TeamGroup, TeamMember, User } from '@/lib/storage/types';
 
 const now = () => new Date().toISOString();
 
 export const pipelineStages = ['new', 'contacted', 'negotiation', 'won', 'lost'] as const;
+
+export const defaultTeamGroupIds = {
+  all: 'all-team',
+  managers: 'managers',
+  leaders: 'leaders',
+} as const;
 
 export function createDefaultPipelineStages(createdAt = now()): PipelineStage[] {
   return [
@@ -56,6 +62,39 @@ export function createDefaultPipelineAutomations(createdAt = now()): PipelineAut
   ];
 }
 
+export function createDefaultTeamGroups(createdBy: string, members: TeamMember[], createdAt = now()): TeamGroup[] {
+  const allMemberIds = members.map((member) => member.id);
+  const managerIds = members.filter((member) => member.role === 'manager').map((member) => member.id);
+  const leaderIds = members.filter((member) => member.role === 'owner' || member.role === 'admin').map((member) => member.id);
+
+  return [
+    {
+      id: defaultTeamGroupIds.all,
+      name: 'Вся команда',
+      memberIds: allMemberIds,
+      createdBy,
+      createdAt,
+      isDefault: true,
+    },
+    {
+      id: defaultTeamGroupIds.managers,
+      name: 'Менеджеры',
+      memberIds: managerIds.length ? managerIds : allMemberIds,
+      createdBy,
+      createdAt,
+      isDefault: true,
+    },
+    {
+      id: defaultTeamGroupIds.leaders,
+      name: 'Руководители',
+      memberIds: leaderIds.length ? leaderIds : [createdBy],
+      createdBy,
+      createdAt,
+      isDefault: true,
+    },
+  ];
+}
+
 export function createEmptyCompanyData(owner: User): CompanyData {
   const ownerMember: TeamMember = {
     id: owner.id,
@@ -71,6 +110,7 @@ export function createEmptyCompanyData(owner: User): CompanyData {
     deals: [],
     tasks: [],
     teamMembers: [ownerMember],
+    teamGroups: createDefaultTeamGroups(owner.id, [ownerMember]),
     pipelineStages: createDefaultPipelineStages(),
     pipelineAutomations: createDefaultPipelineAutomations(),
     teamMessages: [],
@@ -124,6 +164,19 @@ export function createDemoCompanyData(owner: User): CompanyData {
   const taskId = crypto.randomUUID();
   firstDeal.taskIds = [taskId];
 
+  const teamMembers: TeamMember[] = [
+    {
+      id: owner.id,
+      name: owner.name,
+      email: owner.email,
+      phone: owner.phone,
+      role: owner.role,
+      status: 'active',
+      avatarDataUrl: owner.avatarDataUrl,
+    },
+    manager,
+  ];
+
   return {
     deals: [firstDeal, secondDeal],
     tasks: [
@@ -138,18 +191,8 @@ export function createDemoCompanyData(owner: User): CompanyData {
         createdAt: now(),
       },
     ],
-    teamMembers: [
-      {
-        id: owner.id,
-        name: owner.name,
-        email: owner.email,
-        phone: owner.phone,
-        role: owner.role,
-        status: 'active',
-        avatarDataUrl: owner.avatarDataUrl,
-      },
-      manager,
-    ],
+    teamMembers,
+    teamGroups: createDefaultTeamGroups(owner.id, teamMembers),
     pipelineStages: createDefaultPipelineStages(),
     pipelineAutomations: createDefaultPipelineAutomations(),
     teamMessages: [],

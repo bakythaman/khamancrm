@@ -1,7 +1,22 @@
 'use client';
 
-import { Camera, CheckSquare, Edit3, Mail, MessageSquare, PauseCircle, PlayCircle, Plus, Search, ShieldCheck, Trash2, Users } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import {
+  Camera,
+  CheckSquare,
+  Circle,
+  Edit3,
+  Hash,
+  Mail,
+  MessageSquare,
+  PauseCircle,
+  PlayCircle,
+  Plus,
+  Search,
+  ShieldCheck,
+  Trash2,
+  Users,
+} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { TeamMemberFormModal } from '@/components/forms/team-member-form-modal';
 import { PageHeader } from '@/components/layout/page-header';
 import { Avatar } from '@/components/ui/avatar';
@@ -15,21 +30,36 @@ import { useConfirm } from '@/hooks/useConfirm';
 import { useCrmData } from '@/hooks/useCrmData';
 import { useToast } from '@/hooks/useToast';
 import { useTranslation } from '@/hooks/useTranslation';
-import { allPermissions, hasPermission, isDefaultRole } from '@/lib/permissions';
 import { addDays, formatDate } from '@/lib/date-utils';
+import { formatDateTime } from '@/lib/i18n/format';
+import { allPermissions, hasPermission, isDefaultRole } from '@/lib/permissions';
 import type { Permission, RoleDefinition, TeamMember } from '@/lib/storage/types';
+import { cn } from '@/lib/utils';
 
 type TeamTab = 'members' | 'chat' | 'roles';
+type GroupAudience = 'all' | 'managers' | 'leaders' | 'custom';
+
+function isOnline(member: TeamMember) {
+  if (!member.isOnline) return false;
+  if (!member.lastSeenAt) return true;
+  return Date.now() - new Date(member.lastSeenAt).getTime() < 5 * 60 * 1000;
+}
+
+function displayDate(value?: string) {
+  return value ? formatDateTime(value) : '-';
+}
 
 export default function TeamPage() {
   const { currentUser } = useAuth();
   const {
     teamMembers,
+    teamGroups,
     teamMessages,
     deals,
     tasks,
     roles,
     createTask,
+    createTeamGroup,
     addTeamMessage,
     createTeamMember,
     updateTeamMember,
@@ -49,6 +79,10 @@ export default function TeamPage() {
   const [newRoleName, setNewRoleName] = useState('');
   const [message, setMessage] = useState('');
   const [taskAssignee, setTaskAssignee] = useState('none');
+  const [activeGroupId, setActiveGroupId] = useState('');
+  const [newGroupName, setNewGroupName] = useState('');
+  const [groupAudience, setGroupAudience] = useState<GroupAudience>('all');
+  const [customGroupMembers, setCustomGroupMembers] = useState<string[]>([]);
 
   const canViewTeam = hasPermission(currentUser, roles, 'view_team');
   const canManageTeam = hasPermission(currentUser, roles, 'manage_team');
@@ -68,10 +102,35 @@ export default function TeamPage() {
     );
   }, [query, teamMembers]);
 
-  const sortedMessages = useMemo(
-    () => [...teamMessages].sort((first, second) => new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime()),
-    [teamMessages],
+  const visibleGroups = useMemo(
+    () => teamGroups.filter((group) => canManageTeam || group.memberIds.includes(currentUser?.id ?? '')),
+    [canManageTeam, currentUser?.id, teamGroups],
   );
+
+  const activeGroup = useMemo(
+    () => visibleGroups.find((group) => group.id === activeGroupId) ?? visibleGroups[0],
+    [activeGroupId, visibleGroups],
+  );
+
+  const activeGroupMembers = useMemo(
+    () => teamMembers.filter((member) => activeGroup?.memberIds.includes(member.id)),
+    [activeGroup, teamMembers],
+  );
+
+  const sortedMessages = useMemo(
+    () =>
+      [...teamMessages]
+        .filter((item) => item.groupId === activeGroup?.id)
+        .sort((first, second) => new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime()),
+    [activeGroup?.id, teamMessages],
+  );
+
+  useEffect(() => {
+    if (!visibleGroups.length) return;
+    if (!activeGroupId || !visibleGroups.some((group) => group.id === activeGroupId)) {
+      setActiveGroupId(visibleGroups[0]?.id ?? '');
+    }
+  }, [activeGroupId, visibleGroups]);
 
   function roleLabel(roleId: string) {
     const role = roles.find((item) => item.id === roleId);
@@ -162,8 +221,41 @@ export default function TeamPage() {
     reader.readAsDataURL(file);
   }
 
+  function memberIdsForAudience() {
+    if (groupAudience === 'managers') return teamMembers.filter((member) => member.role === 'manager').map((member) => member.id);
+    if (groupAudience === 'leaders') return teamMembers.filter((member) => member.role === 'owner' || member.role === 'admin').map((member) => member.id);
+    if (groupAudience === 'custom') return customGroupMembers;
+    return teamMembers.map((member) => member.id);
+  }
+
+  function handleCreateGroup(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const memberIds = memberIdsForAudience();
+    if (!newGroupName.trim() || !memberIds.length) {
+      showToast(t('validation.required'), 'danger');
+      return;
+    }
+    const group = createTeamGroup(newGroupName, memberIds);
+    if (!group) return;
+    setNewGroupName('');
+    setGroupAudience('all');
+    setCustomGroupMembers([]);
+    setActiveGroupId(group.id);
+    showToast(t('team.groupCreated'));
+  }
+
+  function toggleCustomMember(memberId: string) {
+    setCustomGroupMembers((current) =>
+      current.includes(memberId) ? current.filter((id) => id !== memberId) : [...current, memberId],
+    );
+  }
+
   function sendTeamMessage(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!activeGroup) {
+      showToast(t('team.createGroupFirst'), 'danger');
+      return;
+    }
     if (!message.trim()) {
       showToast(t('validation.required'), 'danger');
       return;
@@ -178,7 +270,7 @@ export default function TeamPage() {
       });
       taskId = task.id;
     }
-    addTeamMessage(message, taskId);
+    addTeamMessage(activeGroup.id, message, taskId);
     setMessage('');
     setTaskAssignee('none');
     showToast(taskId ? t('team.messageTaskCreated') : t('team.messageSent'));
@@ -232,86 +324,126 @@ export default function TeamPage() {
           </div>
 
           <Card className="overflow-hidden">
-            <div className="grid grid-cols-[minmax(220px,1.2fr)_repeat(3,minmax(92px,0.5fr))_180px] gap-3 border-b bg-neutral-50 px-4 py-3 text-sm font-medium text-neutral-500 max-lg:hidden">
+            <div className="grid grid-cols-[minmax(240px,1.2fr)_repeat(3,minmax(120px,0.55fr))_220px] gap-3 border-b bg-neutral-50 px-4 py-3 text-sm font-medium text-neutral-500 max-lg:hidden">
               <span>{t('common.manager')}</span>
-              <span>{t('team.openChats')}</span>
-              <span>{t('team.deals')}</span>
-              <span>{t('team.reply')}</span>
+              <span>{t('team.onlineStatus')}</span>
+              <span>{t('team.leadsProcessed')}</span>
+              <span>{t('team.lastLogin')}</span>
               <span>{t('common.role')}</span>
             </div>
 
             <div className="divide-y">
-              {members.map((member) => {
-                const memberDeals = deals.filter((deal) => deal.assignedTo === member.id).length;
-                const memberTasks = tasks.filter((task) => task.assignedTo === member.id && task.status === 'active').length;
-                const canEditAvatar = member.id === currentUser?.id || canManageTeam;
+              {members.length ? (
+                members.map((member) => {
+                  const memberDeals = deals.filter((deal) => deal.assignedTo === member.id);
+                  const memberTasks = tasks.filter((task) => task.assignedTo === member.id && task.status === 'active').length;
+                  const canEditAvatar = member.id === currentUser?.id || canManageTeam;
+                  const online = isOnline(member);
 
-                return (
-                  <div key={member.id} className="grid gap-3 p-4 lg:grid-cols-[minmax(220px,1.2fr)_repeat(3,minmax(92px,0.5fr))_180px] lg:items-center">
-                    <div className="flex items-center gap-3">
-                      <div className="relative">
-                        <Avatar name={member.name} src={member.avatarDataUrl} />
-                        {canEditAvatar ? (
-                          <label className="absolute -bottom-1 -right-1 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border bg-white shadow-sm" title={t('team.uploadAvatar')}>
-                            <Camera className="h-3 w-3 text-neutral-600" aria-hidden />
-                            <input className="hidden" type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={(event) => handleAvatarUpload(member, event.target.files?.[0])} />
-                          </label>
+                  return (
+                    <div key={member.id} className="grid gap-3 p-4 lg:grid-cols-[minmax(240px,1.2fr)_repeat(3,minmax(120px,0.55fr))_220px] lg:items-center">
+                      <div className="flex items-center gap-3">
+                        <div className="relative">
+                          <Avatar name={member.name} src={member.avatarDataUrl} />
+                          {canEditAvatar ? (
+                            <label className="absolute -bottom-1 -right-1 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border bg-white shadow-sm" title={t('team.uploadAvatar')}>
+                              <Camera className="h-3 w-3 text-neutral-600" aria-hidden />
+                              <input className="hidden" type="file" accept="image/png,image/jpeg,image/svg+xml" onChange={(event) => handleAvatarUpload(member, event.target.files?.[0])} />
+                            </label>
+                          ) : null}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-neutral-950">{member.name}</p>
+                          <p className="truncate text-sm text-neutral-500">{member.email}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between rounded-lg bg-neutral-50 px-3 py-2 text-sm lg:block lg:bg-transparent lg:p-0">
+                        <span className="text-neutral-500 lg:hidden">{t('team.onlineStatus')}</span>
+                        <Badge tone={online ? 'green' : 'neutral'} className="gap-1.5">
+                          <Circle className={cn('h-2 w-2 fill-current', online ? 'text-emerald-600' : 'text-neutral-400')} aria-hidden />
+                          {online ? t('team.online') : t('team.offline')}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center justify-between rounded-lg bg-neutral-50 px-3 py-2 text-sm lg:block lg:bg-transparent lg:p-0">
+                        <span className="text-neutral-500 lg:hidden">{t('team.leadsProcessed')}</span>
+                        <span className="font-medium text-neutral-950">{memberDeals.length}</span>
+                        <p className="text-xs text-neutral-500">{memberTasks} {t('analytics.activeTasks').toLowerCase()}</p>
+                      </div>
+                      <div className="flex items-center justify-between rounded-lg bg-neutral-50 px-3 py-2 text-sm lg:block lg:bg-transparent lg:p-0">
+                        <span className="text-neutral-500 lg:hidden">{t('team.lastLogin')}</span>
+                        <span className="font-medium text-neutral-950">{displayDate(member.lastLoginAt)}</span>
+                        <p className="text-xs text-neutral-500">{t('team.sessions')}: {member.loginCount ?? 0}/{member.logoutCount ?? 0}</p>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge tone={member.role === 'owner' ? 'green' : member.role === 'admin' ? 'blue' : 'neutral'}>
+                            {roleLabel(member.role)}
+                          </Badge>
+                          <Badge tone={member.status === 'active' ? 'green' : 'neutral'}>{t(`statuses.${member.status}`)}</Badge>
+                        </div>
+                        {canManageTeam ? (
+                          <div className="flex shrink-0 items-center gap-1 rounded-md bg-white">
+                            <Button variant="ghost" size="icon" title={t('common.edit')} onClick={() => setEditingMember(member)}>
+                              <Edit3 className="h-4 w-4" aria-hidden />
+                            </Button>
+                            <Button variant="ghost" size="icon" title={t('common.email')} onClick={() => navigator.clipboard?.writeText(member.email).then(() => showToast(t('notifications.copied')))}>
+                              {member.role === 'owner' ? <ShieldCheck className="h-4 w-4" aria-hidden /> : <Mail className="h-4 w-4" aria-hidden />}
+                            </Button>
+                            <Button variant="ghost" size="icon" title={member.status === 'active' ? t('team.deactivate') : t('team.activate')} onClick={() => handleToggleStatus(member)}>
+                              {member.status === 'active' ? <PauseCircle className="h-4 w-4" aria-hidden /> : <PlayCircle className="h-4 w-4" aria-hidden />}
+                            </Button>
+                            <Button variant="ghost" size="icon" title={t('common.delete')} onClick={() => void handleDelete(member)}>
+                              <Trash2 className="h-4 w-4 text-rose-600" aria-hidden />
+                            </Button>
+                          </div>
                         ) : null}
                       </div>
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-neutral-950">{member.name}</p>
-                        <p className="truncate text-sm text-neutral-500">{member.email}</p>
-                      </div>
                     </div>
-                    <div className="flex items-center justify-between rounded-lg bg-neutral-50 px-3 py-2 text-sm lg:block lg:bg-transparent lg:p-0">
-                      <span className="text-neutral-500 lg:hidden">{t('team.openChats')}</span>
-                      <span className="font-medium text-neutral-950">{memberTasks}</span>
-                    </div>
-                    <div className="flex items-center justify-between rounded-lg bg-neutral-50 px-3 py-2 text-sm lg:block lg:bg-transparent lg:p-0">
-                      <span className="text-neutral-500 lg:hidden">{t('team.deals')}</span>
-                      <span className="font-medium text-neutral-950">{memberDeals}</span>
-                    </div>
-                    <div className="flex items-center justify-between rounded-lg bg-neutral-50 px-3 py-2 text-sm lg:block lg:bg-transparent lg:p-0">
-                      <span className="text-neutral-500 lg:hidden">{t('team.reply')}</span>
-                      <span className="font-medium text-neutral-950">11m</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge tone={member.role === 'owner' ? 'green' : member.role === 'admin' ? 'blue' : 'neutral'}>
-                          {roleLabel(member.role)}
-                        </Badge>
-                        <Badge tone={member.status === 'active' ? 'green' : 'neutral'}>{t(`statuses.${member.status}`)}</Badge>
-                      </div>
-                      {canManageTeam ? (
-                        <div className="flex shrink-0 items-center gap-1 rounded-md bg-white">
-                          <Button variant="ghost" size="icon" title={t('common.edit')} onClick={() => setEditingMember(member)}>
-                            <Edit3 className="h-4 w-4" aria-hidden />
-                          </Button>
-                          <Button variant="ghost" size="icon" title={t('common.email')} onClick={() => navigator.clipboard?.writeText(member.email).then(() => showToast(t('notifications.copied')))}>
-                            {member.role === 'owner' ? <ShieldCheck className="h-4 w-4" aria-hidden /> : <Mail className="h-4 w-4" aria-hidden />}
-                          </Button>
-                          <Button variant="ghost" size="icon" title={member.status === 'active' ? t('team.deactivate') : t('team.activate')} onClick={() => handleToggleStatus(member)}>
-                            {member.status === 'active' ? <PauseCircle className="h-4 w-4" aria-hidden /> : <PlayCircle className="h-4 w-4" aria-hidden />}
-                          </Button>
-                          <Button variant="ghost" size="icon" title={t('common.delete')} onClick={() => void handleDelete(member)}>
-                            <Trash2 className="h-4 w-4 text-rose-600" aria-hidden />
-                          </Button>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              ) : (
+                <EmptyState icon={Users} title={t('team.membersTab')} description={t('common.noSearchResults')} />
+              )}
             </div>
           </Card>
         </>
       ) : null}
 
       {activeTab === 'chat' ? (
-        <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
-          <Card>
+        <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)_340px]">
+          <Card className="overflow-hidden">
             <CardHeader>
-              <CardTitle>{t('team.chatTitle')}</CardTitle>
+              <CardTitle>{t('team.groups')}</CardTitle>
+              <Hash className="h-4 w-4 text-neutral-500" aria-hidden />
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {visibleGroups.length ? (
+                visibleGroups.map((group) => (
+                  <Button
+                    key={group.id}
+                    type="button"
+                    variant={activeGroup?.id === group.id ? 'secondary' : 'ghost'}
+                    className="w-full justify-start"
+                    onClick={() => setActiveGroupId(group.id)}
+                  >
+                    <Hash className="h-4 w-4" aria-hidden />
+                    <span className="min-w-0 flex-1 truncate text-left">{group.name}</span>
+                    <span className="text-xs text-neutral-500">{group.memberIds.length}</span>
+                  </Button>
+                ))
+              ) : (
+                <EmptyState icon={MessageSquare} title={t('team.groups')} description={t('team.createGroupFirst')} />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="min-w-0">
+            <CardHeader>
+              <div>
+                <CardTitle>{activeGroup?.name ?? t('team.chatTitle')}</CardTitle>
+                <p className="mt-1 text-xs text-neutral-500">{activeGroupMembers.map((member) => member.name).join(', ')}</p>
+              </div>
+              <Badge>{activeGroupMembers.length} {t('team.groupMembers')}</Badge>
             </CardHeader>
             <CardContent className="space-y-3">
               {sortedMessages.length ? (
@@ -337,39 +469,82 @@ export default function TeamPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('team.newMessage')}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <form className="space-y-3" onSubmit={sendTeamMessage}>
-                <textarea
-                  className="min-h-32 w-full rounded-md border bg-white px-3 py-2 text-sm outline-none transition placeholder:text-neutral-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
-                  value={message}
-                  onChange={(event) => setMessage(event.target.value)}
-                  placeholder={t('team.messagePlaceholder')}
-                />
-                {canCreateTask ? (
-                  <select
-                    value={taskAssignee}
-                    onChange={(event) => setTaskAssignee(event.target.value)}
-                    className="h-10 w-full rounded-md border bg-white px-3 text-sm outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
-                  >
-                    <option value="none">{t('team.commentOnly')}</option>
-                    {teamMembers.map((member) => (
-                      <option key={member.id} value={member.id}>
-                        {t('team.assignTaskTo')} {member.name}
-                      </option>
-                    ))}
-                  </select>
-                ) : null}
-                <Button className="w-full">
-                  <CheckSquare className="h-4 w-4" aria-hidden />
-                  {t('team.sendMessage')}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
+          <div className="space-y-5">
+            <Card>
+              <CardHeader>
+                <CardTitle>{t('team.newMessage')}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form className="space-y-3" onSubmit={sendTeamMessage}>
+                  <textarea
+                    className="min-h-32 w-full rounded-md border bg-white px-3 py-2 text-sm outline-none transition placeholder:text-neutral-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+                    value={message}
+                    onChange={(event) => setMessage(event.target.value)}
+                    placeholder={t('team.messagePlaceholder')}
+                  />
+                  {canCreateTask ? (
+                    <select
+                      value={taskAssignee}
+                      onChange={(event) => setTaskAssignee(event.target.value)}
+                      className="h-10 w-full rounded-md border bg-white px-3 text-sm outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+                    >
+                      <option value="none">{t('team.commentOnly')}</option>
+                      {activeGroupMembers.map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {t('team.assignTaskTo')} {member.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
+                  <Button className="w-full">
+                    <CheckSquare className="h-4 w-4" aria-hidden />
+                    {t('team.sendMessage')}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+
+            {canManageTeam ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t('team.createGroup')}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <form className="space-y-3" onSubmit={handleCreateGroup}>
+                    <Input value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} placeholder={t('team.groupName')} />
+                    <select
+                      value={groupAudience}
+                      onChange={(event) => {
+                        setGroupAudience(event.target.value as GroupAudience);
+                        setCustomGroupMembers([]);
+                      }}
+                      className="h-10 w-full rounded-md border bg-white px-3 text-sm outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+                    >
+                      <option value="all">{t('team.groupAll')}</option>
+                      <option value="managers">{t('team.groupManagers')}</option>
+                      <option value="leaders">{t('team.groupLeaders')}</option>
+                      <option value="custom">{t('team.groupCustom')}</option>
+                    </select>
+                    {groupAudience === 'custom' ? (
+                      <div className="max-h-44 space-y-2 overflow-auto rounded-md border bg-neutral-50 p-2">
+                        {teamMembers.map((member) => (
+                          <label key={member.id} className="flex items-center gap-2 rounded-md bg-white px-2 py-1 text-sm">
+                            <input type="checkbox" checked={customGroupMembers.includes(member.id)} onChange={() => toggleCustomMember(member.id)} />
+                            <Avatar name={member.name} src={member.avatarDataUrl} className="h-6 w-6 text-[10px]" />
+                            <span className="min-w-0 truncate">{member.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    ) : null}
+                    <Button className="w-full">
+                      <Plus className="h-4 w-4" aria-hidden />
+                      {t('common.create')}
+                    </Button>
+                  </form>
+                </CardContent>
+              </Card>
+            ) : null}
+          </div>
         </div>
       ) : null}
 

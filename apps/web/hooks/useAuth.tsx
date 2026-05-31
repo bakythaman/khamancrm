@@ -5,7 +5,7 @@ import { apiRequest, isApiEnabled } from '@/lib/api/client';
 import { hashPassword } from '@/lib/auth/password';
 import { storageKeys } from '@/lib/storage/keys';
 import { readJson, readString, removeItem, writeJson, writeString } from '@/lib/storage/local-store';
-import type { Company, Language, LoginPayload, RegisterPayload, TeamMemberPayload, User } from '@/lib/storage/types';
+import type { Company, CompanyData, Language, LoginPayload, RegisterPayload, TeamMemberPayload, User } from '@/lib/storage/types';
 import { createEmptyCompanyData } from '@/lib/mock-data/seed';
 import { useTranslation } from '@/hooks/useTranslation';
 
@@ -113,6 +113,35 @@ function normalizeUser(user: User): User {
   };
 }
 
+function markUserPresence(user: User, event: 'login' | 'logout' | 'seen') {
+  const key = storageKeys.companyData(user.companyId);
+  const companyData = readJson<CompanyData | null>(key, null) ?? createEmptyCompanyData(user);
+  const timestamp = new Date().toISOString();
+  const teamMembers = companyData.teamMembers.map((member) =>
+    member.id === user.id
+      ? {
+          ...member,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          avatarDataUrl: user.avatarDataUrl,
+          isOnline: event !== 'logout',
+          lastSeenAt: timestamp,
+          lastLoginAt: event === 'login' ? timestamp : member.lastLoginAt,
+          lastLogoutAt: event === 'logout' ? timestamp : member.lastLogoutAt,
+          loginCount: event === 'login' ? (member.loginCount ?? 0) + 1 : (member.loginCount ?? 0),
+          logoutCount: event === 'logout' ? (member.logoutCount ?? 0) + 1 : (member.logoutCount ?? 0),
+        }
+      : member,
+  );
+
+  writeJson(key, {
+    ...companyData,
+    teamMembers,
+  });
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { setLanguage } = useTranslation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -124,11 +153,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const token = readString(storageKeys.apiToken);
       if (token) {
         void apiRequest<ApiMeResponse>('/auth/me')
-          .then((payload) => {
-            const mapped = mapApiUser(payload);
-            setCurrentUser(mapped.user);
-            setCompany(mapped.company);
-            setLanguage(mapped.user.language);
+	          .then((payload) => {
+	            const mapped = mapApiUser(payload);
+	            markUserPresence(mapped.user, 'seen');
+	            setCurrentUser(mapped.user);
+	            setCompany(mapped.company);
+	            setLanguage(mapped.user.language);
           })
           .catch(() => {
             removeItem(storageKeys.apiToken);
@@ -142,9 +172,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const user = readUsers().map(normalizeUser).find((item) => item.id === sessionUserId) ?? null;
     const userCompany = user ? readCompanies().find((item) => item.id === user.companyId) ?? null : null;
 
-    if (user) {
-      setCurrentUser(user);
-      setLanguage(user.language);
+	    if (user) {
+	      markUserPresence(user, 'seen');
+	      setCurrentUser(user);
+	      setLanguage(user.language);
     }
     setCompany(userCompany);
     setLoading(false);
@@ -157,9 +188,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           method: 'POST',
           body: JSON.stringify(payload),
         });
-        writeString(storageKeys.apiToken, response.accessToken);
-        const mapped = mapApiUser(response);
-        setCurrentUser(mapped.user);
+	        writeString(storageKeys.apiToken, response.accessToken);
+	        const mapped = mapApiUser(response);
+	        markUserPresence(mapped.user, 'login');
+	        setCurrentUser(mapped.user);
         setCompany(mapped.company);
         setLanguage(mapped.user.language);
         return;
@@ -193,10 +225,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         active: true,
       };
 
-      writeJson(storageKeys.users, [...users, user]);
-      writeJson(storageKeys.companies, [...readCompanies(), companyRecord]);
-      writeJson(storageKeys.companyData(companyId), createEmptyCompanyData(user));
-      writeString(storageKeys.sessionUserId, user.id);
+	      writeJson(storageKeys.users, [...users, user]);
+	      writeJson(storageKeys.companies, [...readCompanies(), companyRecord]);
+	      writeJson(storageKeys.companyData(companyId), createEmptyCompanyData(user));
+	      markUserPresence(user, 'login');
+	      writeString(storageKeys.sessionUserId, user.id);
 
       setCurrentUser(user);
       setCompany(companyRecord);
@@ -212,9 +245,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           method: 'POST',
           body: JSON.stringify(payload),
         });
-        writeString(storageKeys.apiToken, response.accessToken);
-        const mapped = mapApiUser(response);
-        setCurrentUser(mapped.user);
+	        writeString(storageKeys.apiToken, response.accessToken);
+	        const mapped = mapApiUser(response);
+	        markUserPresence(mapped.user, 'login');
+	        setCurrentUser(mapped.user);
         setCompany(mapped.company);
         setLanguage(mapped.user.language);
         return;
@@ -232,21 +266,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error('validation.inactiveUser');
       }
 
-      const userCompany = readCompanies().find((item) => item.id === user.companyId) ?? null;
-      writeString(storageKeys.sessionUserId, user.id);
-      setCurrentUser(user);
+	      const userCompany = readCompanies().find((item) => item.id === user.companyId) ?? null;
+	      writeString(storageKeys.sessionUserId, user.id);
+	      markUserPresence(user, 'login');
+	      setCurrentUser(user);
       setCompany(userCompany);
       setLanguage(user.language);
     },
     [setLanguage],
   );
 
-  const logout = useCallback(() => {
-    removeItem(storageKeys.sessionUserId);
-    removeItem(storageKeys.apiToken);
-    setCurrentUser(null);
-    setCompany(null);
-  }, []);
+	  const logout = useCallback(() => {
+	    if (currentUser) markUserPresence(currentUser, 'logout');
+	    removeItem(storageKeys.sessionUserId);
+	    removeItem(storageKeys.apiToken);
+	    setCurrentUser(null);
+	    setCompany(null);
+	  }, [currentUser]);
 
   const requestPasswordReset = useCallback(async (email: string) => {
     if (!isApiEnabled()) {

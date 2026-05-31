@@ -22,6 +22,7 @@ export type Permission =
   | 'delete_task'
   | 'view_analytics'
   | 'export_analytics'
+  | 'view_admin'
   | 'view_team'
   | 'manage_team'
   | 'view_settings'
@@ -126,10 +127,26 @@ export interface TeamMember {
   role: UserRole;
   status: TeamStatus;
   avatarDataUrl?: string;
+  isOnline?: boolean;
+  lastLoginAt?: string;
+  lastLogoutAt?: string;
+  lastSeenAt?: string;
+  loginCount?: number;
+  logoutCount?: number;
+}
+
+export interface TeamGroup {
+  id: string;
+  name: string;
+  memberIds: string[];
+  createdBy: string;
+  createdAt: string;
+  isDefault?: boolean;
 }
 
 export interface TeamMessage {
   id: string;
+  groupId: string;
   authorId: string;
   text: string;
   taskId?: string;
@@ -140,6 +157,7 @@ export interface CompanyData {
   deals: Deal[];
   tasks: CrmTask[];
   teamMembers: TeamMember[];
+  teamGroups: TeamGroup[];
   pipelineStages: PipelineStage[];
   pipelineAutomations: PipelineAutomation[];
   teamMessages: TeamMessage[];

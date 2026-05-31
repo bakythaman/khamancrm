@@ -1,7 +1,14 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { createDefaultPipelineAutomations, createDefaultPipelineStages, createDefaultSettings, createEmptyCompanyData } from '@/lib/mock-data/seed';
+import {
+  createDefaultPipelineAutomations,
+  createDefaultPipelineStages,
+  createDefaultSettings,
+  createDefaultTeamGroups,
+  createEmptyCompanyData,
+  defaultTeamGroupIds,
+} from '@/lib/mock-data/seed';
 import { createDefaultRoles, isDefaultRole } from '@/lib/permissions';
 import { storageKeys } from '@/lib/storage/keys';
 import { readJson, writeJson } from '@/lib/storage/local-store';
@@ -19,6 +26,7 @@ import type {
   PipelineStage,
   RoleDefinition,
   TaskPayload,
+  TeamGroup,
   TeamMessage,
   TeamMember,
   TeamMemberPayload,
@@ -49,7 +57,8 @@ interface CrmDataContextValue extends CompanyData {
   createPipelineAutomation: (payload: Omit<PipelineAutomation, 'id' | 'createdAt'>) => PipelineAutomation;
   updatePipelineAutomation: (id: string, payload: Partial<Pick<PipelineAutomation, 'type' | 'name' | 'stageId' | 'message' | 'enabled'>>) => void;
   deletePipelineAutomation: (id: string) => void;
-  addTeamMessage: (text: string, taskId?: string) => TeamMessage | null;
+  createTeamGroup: (name: string, memberIds: string[]) => TeamGroup | null;
+  addTeamMessage: (groupId: string, text: string, taskId?: string) => TeamMessage | null;
   updateCompanySettings: (payload: Partial<CompanySettings>) => void;
   createRole: (name: string, permissions: Permission[]) => RoleDefinition;
   updateRole: (id: string, payload: Partial<Pick<RoleDefinition, 'name' | 'permissions'>>) => void;
@@ -60,6 +69,7 @@ const emptyData: CompanyData = {
   deals: [],
   tasks: [],
   teamMembers: [],
+  teamGroups: [],
   pipelineStages: createDefaultPipelineStages(),
   pipelineAutomations: [],
   teamMessages: [],
@@ -84,6 +94,35 @@ function normalizeLegacyStatus(status: unknown, stageId: string): DealStatus {
   if (status === 'won' || status === 'lost') return status;
   if (status === 'active') return 'active';
   return statusForStage(stageId);
+}
+
+function defaultGroupMemberIds(groupId: string, members: TeamMember[]) {
+  if (groupId === defaultTeamGroupIds.managers) {
+    const managers = members.filter((member) => member.role === 'manager').map((member) => member.id);
+    return managers.length ? managers : members.map((member) => member.id);
+  }
+  if (groupId === defaultTeamGroupIds.leaders) {
+    const leaders = members.filter((member) => member.role === 'owner' || member.role === 'admin').map((member) => member.id);
+    return leaders.length ? leaders : members.map((member) => member.id);
+  }
+  return members.map((member) => member.id);
+}
+
+function syncDefaultGroups(groups: TeamGroup[], members: TeamMember[]) {
+  const memberIds = new Set(members.map((member) => member.id));
+  return groups.map((group) => {
+    if (!group.isDefault) {
+      return {
+        ...group,
+        memberIds: group.memberIds.filter((id) => memberIds.has(id)),
+      };
+    }
+
+    return {
+      ...group,
+      memberIds: defaultGroupMemberIds(group.id, members),
+    };
+  });
 }
 
 function migrateCompanyData(data: CompanyData | null, owner: User): CompanyData {
@@ -117,6 +156,21 @@ function migrateCompanyData(data: CompanyData | null, owner: User): CompanyData 
     });
   });
   const teamMembers = Array.from(memberMap.values());
+  const existingTeamGroups = base.teamGroups?.length
+    ? base.teamGroups
+    : createDefaultTeamGroups(owner.id, teamMembers, createdAt);
+  const teamGroups = syncDefaultGroups(
+    existingTeamGroups.map((group) => ({
+      ...group,
+      name: group.name?.trim() || 'Команда',
+      memberIds: Array.isArray(group.memberIds) ? group.memberIds : [],
+      createdBy: group.createdBy || owner.id,
+      createdAt: group.createdAt ?? createdAt,
+    })),
+    teamMembers,
+  );
+  const fallbackGroupId = teamGroups[0]?.id ?? defaultTeamGroupIds.all;
+  const groupIds = new Set(teamGroups.map((group) => group.id));
 
   const deals = (base.deals ?? []).map((deal) => {
     const legacyStage = deal.stage as DealStage | undefined;
@@ -140,21 +194,23 @@ function migrateCompanyData(data: CompanyData | null, owner: User): CompanyData 
   }));
 
   return {
-    deals,
-    tasks,
-    teamMembers,
-    pipelineStages,
+	    deals,
+	    tasks,
+	    teamMembers,
+	    teamGroups,
+	    pipelineStages,
     pipelineAutomations: (base.pipelineAutomations?.length ? base.pipelineAutomations : createDefaultPipelineAutomations(createdAt)).map((automation) => ({
       ...automation,
       type: automation.type ?? ('robot' as PipelineAutomationType),
       stageId: normalizeStageId(automation.stageId, pipelineStages),
       enabled: automation.enabled ?? true,
       createdAt: automation.createdAt ?? createdAt,
-    })),
-    teamMessages: (base.teamMessages ?? []).map((message) => ({
-      ...message,
-      createdAt: message.createdAt ?? createdAt,
-    })),
+	    })),
+	    teamMessages: (base.teamMessages ?? []).map((message) => ({
+	      ...message,
+	      groupId: groupIds.has(message.groupId) ? message.groupId : fallbackGroupId,
+	      createdAt: message.createdAt ?? createdAt,
+	    })),
     roles,
     settings: {
       ...createDefaultSettings(),
@@ -195,6 +251,38 @@ export function CrmDataProvider({ children }: { children: React.ReactNode }) {
     },
     [currentUser],
   );
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const touchPresence = () => {
+      const timestamp = new Date().toISOString();
+      persist((current) => ({
+        ...current,
+        teamMembers: current.teamMembers.map((member) =>
+          member.id === currentUser.id
+            ? {
+                ...member,
+                isOnline: true,
+                lastSeenAt: timestamp,
+              }
+            : member,
+        ),
+      }));
+    };
+
+    touchPresence();
+    const intervalId = window.setInterval(touchPresence, 60000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') touchPresence();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [currentUser, persist]);
 
   const createDeal = useCallback(
     (payload: DealPayload) => {
@@ -359,18 +447,28 @@ export function CrmDataProvider({ children }: { children: React.ReactNode }) {
   const createTeamMember = useCallback(
     async (payload: TeamMemberPayload) => {
       const user = await createCompanyUser(payload);
-      const member: TeamMember = {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        status: 'active',
-        avatarDataUrl: user.avatarDataUrl,
-      };
-      persist((current) => ({ ...current, teamMembers: [...current.teamMembers, member] }));
-      return member;
-    },
+	      const member: TeamMember = {
+	        id: user.id,
+	        name: user.name,
+	        email: user.email,
+	        phone: user.phone,
+	        role: user.role,
+	        status: 'active',
+	        avatarDataUrl: user.avatarDataUrl,
+	        isOnline: false,
+	        loginCount: 0,
+	        logoutCount: 0,
+	      };
+	      persist((current) => {
+	        const teamMembers = [...current.teamMembers, member];
+	        return {
+	          ...current,
+	          teamMembers,
+	          teamGroups: syncDefaultGroups(current.teamGroups, teamMembers),
+	        };
+	      });
+	      return member;
+	    },
     [createCompanyUser, persist],
   );
 
@@ -383,11 +481,15 @@ export function CrmDataProvider({ children }: { children: React.ReactNode }) {
         role: payload.role,
         avatarDataUrl: payload.avatarDataUrl,
       });
-      persist((current) => ({
-        ...current,
-        teamMembers: current.teamMembers.map((member) => (member.id === id ? { ...member, ...payload } : member)),
-      }));
-    },
+	      persist((current) => {
+	        const teamMembers = current.teamMembers.map((member) => (member.id === id ? { ...member, ...payload } : member));
+	        return {
+	          ...current,
+	          teamMembers,
+	          teamGroups: syncDefaultGroups(current.teamGroups, teamMembers),
+	        };
+	      });
+	    },
     [persist, updateCompanyUser],
   );
 
@@ -410,10 +512,14 @@ export function CrmDataProvider({ children }: { children: React.ReactNode }) {
     (id: string) => {
       const fallbackOwner = currentUser?.id ?? data.teamMembers.find((member) => member.id !== id)?.id;
       deleteCompanyUser(id);
-      persist((current) => ({
-        ...current,
-        teamMembers: current.teamMembers.filter((member) => member.id !== id),
-        deals: current.deals.map((deal) =>
+	      persist((current) => ({
+	        ...current,
+	        teamMembers: current.teamMembers.filter((member) => member.id !== id),
+	        teamGroups: current.teamGroups.map((group) => ({
+	          ...group,
+	          memberIds: group.memberIds.filter((memberId) => memberId !== id),
+	        })),
+	        deals: current.deals.map((deal) =>
           deal.assignedTo === id && fallbackOwner ? { ...deal, assignedTo: fallbackOwner } : deal,
         ),
         tasks: current.tasks.map((task) =>
@@ -532,31 +638,53 @@ export function CrmDataProvider({ children }: { children: React.ReactNode }) {
     [persist],
   );
 
-  const deletePipelineAutomation = useCallback(
-    (id: string) => {
-      persist((current) => ({
-        ...current,
-        pipelineAutomations: current.pipelineAutomations.filter((automation) => automation.id !== id),
-      }));
-    },
-    [persist],
-  );
+	  const deletePipelineAutomation = useCallback(
+	    (id: string) => {
+	      persist((current) => ({
+	        ...current,
+	        pipelineAutomations: current.pipelineAutomations.filter((automation) => automation.id !== id),
+	      }));
+	    },
+	    [persist],
+	  );
 
-  const addTeamMessage = useCallback(
-    (text: string, taskId?: string) => {
-      if (!currentUser || !text.trim()) return null;
-      const message: TeamMessage = {
-        id: crypto.randomUUID(),
-        authorId: currentUser.id,
-        text: text.trim(),
-        taskId,
-        createdAt: new Date().toISOString(),
-      };
-      persist((current) => ({ ...current, teamMessages: [...current.teamMessages, message] }));
-      return message;
-    },
-    [currentUser, persist],
-  );
+	  const createTeamGroup = useCallback(
+	    (name: string, memberIds: string[]) => {
+	      if (!currentUser || !name.trim()) return null;
+	      const existingMemberIds = new Set(data.teamMembers.map((member) => member.id));
+	      const normalizedMemberIds = Array.from(new Set(memberIds.filter((memberId) => existingMemberIds.has(memberId))));
+	      const group: TeamGroup = {
+	        id: crypto.randomUUID(),
+	        name: name.trim(),
+	        memberIds: normalizedMemberIds.length ? normalizedMemberIds : [currentUser.id],
+	        createdBy: currentUser.id,
+	        createdAt: new Date().toISOString(),
+	        isDefault: false,
+	      };
+	      persist((current) => ({ ...current, teamGroups: [...current.teamGroups, group] }));
+	      return group;
+	    },
+	    [currentUser, data.teamMembers, persist],
+	  );
+
+	  const addTeamMessage = useCallback(
+	    (groupId: string, text: string, taskId?: string) => {
+	      if (!currentUser || !text.trim()) return null;
+	      const targetGroupId = data.teamGroups.some((group) => group.id === groupId) ? groupId : data.teamGroups[0]?.id;
+	      if (!targetGroupId) return null;
+	      const message: TeamMessage = {
+	        id: crypto.randomUUID(),
+	        groupId: targetGroupId,
+	        authorId: currentUser.id,
+	        text: text.trim(),
+	        taskId,
+	        createdAt: new Date().toISOString(),
+	      };
+	      persist((current) => ({ ...current, teamMessages: [...current.teamMessages, message] }));
+	      return message;
+	    },
+	    [currentUser, data.teamGroups, persist],
+	  );
 
   const updateCompanySettings = useCallback(
     (payload: Partial<CompanySettings>) => {
@@ -628,11 +756,12 @@ export function CrmDataProvider({ children }: { children: React.ReactNode }) {
       updatePipelineStage,
       reorderPipelineStage,
       deletePipelineStage,
-      createPipelineAutomation,
-      updatePipelineAutomation,
-      deletePipelineAutomation,
-      addTeamMessage,
-      updateCompanySettings,
+	      createPipelineAutomation,
+	      updatePipelineAutomation,
+	      deletePipelineAutomation,
+	      createTeamGroup,
+	      addTeamMessage,
+	      updateCompanySettings,
       createRole,
       updateRole,
       deleteRole,
@@ -643,10 +772,11 @@ export function CrmDataProvider({ children }: { children: React.ReactNode }) {
       completeTask,
       createDeal,
       createPipelineAutomation,
-      createPipelineStage,
-      createRole,
-      createTask,
-      createTeamMember,
+	      createPipelineStage,
+	      createRole,
+	      createTask,
+	      createTeamGroup,
+	      createTeamMember,
       data,
       deleteDeal,
       deletePipelineAutomation,

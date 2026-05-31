@@ -12,6 +12,7 @@ export const allPermissions: Permission[] = [
   'delete_task',
   'view_analytics',
   'export_analytics',
+  'view_admin',
   'view_team',
   'manage_team',
   'view_settings',
