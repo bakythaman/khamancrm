@@ -10,10 +10,11 @@ import { useAuth } from '@/hooks/useAuth';
 import { useCrmData } from '@/hooks/useCrmData';
 import { useTranslation } from '@/hooks/useTranslation';
 import { formatAmount, formatDateTime } from '@/lib/i18n/format';
+import { isPlatformAdmin } from '@/lib/platform/admin';
 import { hasPermission } from '@/lib/permissions';
 import { storageKeys } from '@/lib/storage/keys';
 import { readJson } from '@/lib/storage/local-store';
-import type { Company, CompanyData, CrmTask, Deal, TeamMember, User } from '@/lib/storage/types';
+import type { Company, CompanyData, Deal, TeamMember, User } from '@/lib/storage/types';
 import { cn } from '@/lib/utils';
 
 interface CompanySnapshot {
@@ -100,7 +101,7 @@ export default function AdminPage() {
   const { roles } = useCrmData();
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<AdminSnapshot>({ companies: [], users: [] });
-  const canViewAdmin = hasPermission(currentUser, roles, 'view_admin');
+  const canViewAdmin = isPlatformAdmin(currentUser) && hasPermission(currentUser, roles, 'view_admin');
 
   useEffect(() => {
     setSnapshot(loadSnapshot());

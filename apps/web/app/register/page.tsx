@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Building2 } from 'lucide-react';
+import { Building2, MessageCircle, PaintRoller } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -10,6 +10,8 @@ import { Input } from '@/components/ui/input';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/useToast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { slugifyLandingUsername } from '@/lib/mock-data/seed';
+import type { CompanyVertical } from '@/lib/storage/types';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -18,11 +20,40 @@ export default function RegisterPage() {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<{
+    name: string;
+    email: string;
+    phone: string;
+    companyName: string;
+    companyVertical: CompanyVertical;
+    repairSite: {
+      username: string;
+      headline: string;
+      subheadline: string;
+      cities: string;
+      address: string;
+      servicesText: string;
+      primaryColor: string;
+      accentColor: string;
+    };
+    password: string;
+    confirmPassword: string;
+  }>({
     name: '',
     email: '',
     phone: '',
     companyName: '',
+    companyVertical: 'repair',
+    repairSite: {
+      username: '',
+      headline: 'Дизайн и ремонт под ключ',
+      subheadline: 'Расскажите, какие услуги вы делаете и почему клиентам удобно работать с вами.',
+      cities: 'Шымкент, Алматы',
+      address: '',
+      servicesText: 'Дизайн-проект - планировки, визуализации и чертежи\nРемонт под ключ - полный цикл работ до сдачи\nКомплектация - материалы, мебель и поставщики',
+      primaryColor: '#111111',
+      accentColor: '#d6a83f',
+    },
     password: '',
     confirmPassword: '',
   });
@@ -61,7 +92,19 @@ export default function RegisterPage() {
 
     try {
       setLoading(true);
-      await register(form);
+      await register({
+        ...form,
+        repairSite:
+          form.companyVertical === 'repair'
+            ? {
+                ...form.repairSite,
+                username: slugifyLandingUsername(form.repairSite.username || form.companyName),
+                brandName: form.companyName,
+                phone: form.phone,
+                whatsapp: form.phone,
+              }
+            : undefined,
+      });
       showToast(t('auth.registered'));
       router.push('/dashboard');
     } catch (caught) {
@@ -105,6 +148,90 @@ export default function RegisterPage() {
             <span className="text-sm font-medium text-neutral-700">{t('auth.companyName')}</span>
             <Input value={form.companyName} onChange={(event) => setForm({ ...form, companyName: event.target.value })} />
           </label>
+          <div className="space-y-2">
+            <span className="text-sm font-medium text-neutral-700">Профиль CRM</span>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button
+                className={`rounded-lg border p-3 text-left transition ${form.companyVertical === 'repair' ? 'border-neutral-950 bg-neutral-50' : 'bg-white hover:bg-neutral-50'}`}
+                onClick={() => setForm({ ...form, companyVertical: 'repair' })}
+                type="button"
+              >
+                <span className="flex items-center gap-2 text-sm font-semibold text-neutral-950">
+                  <PaintRoller className="h-4 w-4" aria-hidden />
+                  Ремонтная компания
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-neutral-500">Лендинг, заявки, проекты, задачи рабочих и кабинет клиента.</span>
+              </button>
+              <button
+                className={`rounded-lg border p-3 text-left transition ${form.companyVertical === 'sales' ? 'border-neutral-950 bg-neutral-50' : 'bg-white hover:bg-neutral-50'}`}
+                onClick={() => setForm({ ...form, companyVertical: 'sales' })}
+                type="button"
+              >
+                <span className="flex items-center gap-2 text-sm font-semibold text-neutral-950">
+                  <MessageCircle className="h-4 w-4" aria-hidden />
+                  Продажи и заявки
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-neutral-500">Воронка, задачи, команда и WhatsApp-first workflow.</span>
+              </button>
+            </div>
+          </div>
+          {form.companyVertical === 'repair' ? (
+            <div className="space-y-3 rounded-lg border bg-neutral-50 p-3">
+              <div>
+                <p className="text-sm font-semibold text-neutral-950">Данные для лендинга компании</p>
+                <p className="mt-1 text-xs leading-5 text-neutral-500">Из этих полей Khaman CRM соберет первый лендинг. Потом его можно редактировать в конструкторе.</p>
+              </div>
+              <label className="space-y-2">
+                <span className="text-sm font-medium text-neutral-700">Юзернейм лендинга</span>
+                <Input
+                  placeholder={slugifyLandingUsername(form.companyName || 'company')}
+                  value={form.repairSite.username}
+                  onChange={(event) => setForm({ ...form, repairSite: { ...form.repairSite, username: slugifyLandingUsername(event.target.value, '') } })}
+                />
+                <span className="block text-xs text-neutral-500">Адрес будет: /site?u={form.repairSite.username || slugifyLandingUsername(form.companyName || 'company')}</span>
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm font-medium text-neutral-700">Главный заголовок</span>
+                <Input value={form.repairSite.headline} onChange={(event) => setForm({ ...form, repairSite: { ...form.repairSite, headline: event.target.value } })} />
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm font-medium text-neutral-700">Короткое описание</span>
+                <textarea
+                  className="min-h-20 w-full rounded-md border bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+                  value={form.repairSite.subheadline}
+                  onChange={(event) => setForm({ ...form, repairSite: { ...form.repairSite, subheadline: event.target.value } })}
+                />
+              </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-2">
+                  <span className="text-sm font-medium text-neutral-700">Города через запятую</span>
+                  <Input value={form.repairSite.cities} onChange={(event) => setForm({ ...form, repairSite: { ...form.repairSite, cities: event.target.value } })} />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm font-medium text-neutral-700">Адрес офиса</span>
+                  <Input value={form.repairSite.address} onChange={(event) => setForm({ ...form, repairSite: { ...form.repairSite, address: event.target.value } })} />
+                </label>
+              </div>
+              <label className="space-y-2">
+                <span className="text-sm font-medium text-neutral-700">Услуги, каждая с новой строки</span>
+                <textarea
+                  className="min-h-24 w-full rounded-md border bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+                  value={form.repairSite.servicesText}
+                  onChange={(event) => setForm({ ...form, repairSite: { ...form.repairSite, servicesText: event.target.value } })}
+                />
+              </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-2">
+                  <span className="text-sm font-medium text-neutral-700">Основной цвет</span>
+                  <Input type="color" value={form.repairSite.primaryColor} onChange={(event) => setForm({ ...form, repairSite: { ...form.repairSite, primaryColor: event.target.value } })} />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm font-medium text-neutral-700">Акцентный цвет</span>
+                  <Input type="color" value={form.repairSite.accentColor} onChange={(event) => setForm({ ...form, repairSite: { ...form.repairSite, accentColor: event.target.value } })} />
+                </label>
+              </div>
+            </div>
+          ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-2">
               <span className="text-sm font-medium text-neutral-700">{t('auth.password')}</span>

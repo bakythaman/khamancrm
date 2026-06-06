@@ -6,10 +6,12 @@ import {
   BarChart3,
   Bell,
   CheckSquare,
+  Globe2,
   Inbox,
   LayoutDashboard,
   Menu,
 	  PanelLeftClose,
+	  Hammer,
 	  Phone,
 	  Search,
 	  Settings,
@@ -24,6 +26,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useCrmData } from '@/hooks/useCrmData';
 import { useToast } from '@/hooks/useToast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { isPlatformAdmin } from '@/lib/platform/admin';
 import { hasPermission } from '@/lib/permissions';
 import type { Permission } from '@/lib/storage/types';
 import { cn } from '@/lib/utils';
@@ -31,11 +34,14 @@ import { cn } from '@/lib/utils';
 const navItems = [
   { labelKey: 'navigation.dashboard', href: '/dashboard', icon: LayoutDashboard, permission: 'view_dashboard' },
   { labelKey: 'navigation.pipeline', href: '/pipeline', icon: Workflow, permission: 'view_pipeline' },
+  { labelKey: 'navigation.repair', href: '/repair', icon: Hammer, permission: 'view_pipeline', repairOnly: true },
+  { labelKey: 'navigation.repairSite', href: '/site', icon: Globe2, permission: 'view_pipeline', repairOnly: true },
+  { labelKey: 'navigation.siteBuilder', href: '/site-builder', icon: LayoutDashboard, permission: 'manage_settings', repairOnly: true },
   { labelKey: 'navigation.inbox', href: '/inbox', icon: Inbox, permission: 'view_pipeline' },
   { labelKey: 'navigation.tasks', href: '/tasks', icon: CheckSquare, permission: 'view_tasks' },
 	  { labelKey: 'navigation.analytics', href: '/analytics', icon: BarChart3, permission: 'view_analytics' },
 	  { labelKey: 'navigation.team', href: '/team', icon: Users, permission: 'view_team' },
-	  { labelKey: 'navigation.admin', href: '/admin', icon: ShieldCheck, permission: 'view_admin' },
+	  { labelKey: 'navigation.admin', href: '/admin', icon: ShieldCheck, permission: 'view_admin', platformAdminOnly: true },
 	  { labelKey: 'navigation.settings', href: '/settings', icon: Settings, permission: 'view_settings' },
 ] as const;
 
@@ -45,11 +51,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const { currentUser, company } = useAuth();
-  const { roles, settings } = useCrmData();
+  const { repair, roles, settings } = useCrmData();
   const { showToast } = useToast();
   const { t } = useTranslation();
 
-  const visibleNavItems = navItems.filter((item) => hasPermission(currentUser, roles, item.permission as Permission));
+  const visibleNavItems = navItems.filter((item) => {
+    if ('repairOnly' in item && item.repairOnly && company?.vertical !== 'repair') return false;
+    if ('platformAdminOnly' in item && item.platformAdminOnly && !isPlatformAdmin(currentUser)) return false;
+    return hasPermission(currentUser, roles, item.permission as Permission);
+  });
 
   function handleSearch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -95,13 +105,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <nav className="flex-1 space-y-1 px-3 py-3">
           {visibleNavItems.map((item) => {
+            const href = item.labelKey === 'navigation.repairSite' && repair?.site.username ? `/site?u=${repair.site.username}` : item.href;
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
 
             return (
               <Link
-                key={item.href}
-                href={item.href}
+                key={item.labelKey}
+                href={href}
                 onClick={() => setOpen(false)}
                 className={cn(
                   'flex h-10 items-center gap-3 rounded-md px-3 text-sm font-medium text-neutral-600 transition hover:bg-neutral-100 hover:text-neutral-950',

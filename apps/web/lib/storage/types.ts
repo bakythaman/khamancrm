@@ -1,5 +1,7 @@
 export type Language = 'ru' | 'kz';
 
+export type CompanyVertical = 'sales' | 'repair';
+
 export type UserRole = string;
 
 export type TeamStatus = 'active' | 'inactive' | 'invited';
@@ -46,6 +48,7 @@ export interface User {
 export interface Company {
   id: string;
   name: string;
+  vertical: CompanyVertical;
   createdAt: string;
 }
 
@@ -163,6 +166,7 @@ export interface CompanyData {
   teamMessages: TeamMessage[];
   roles: RoleDefinition[];
   settings: CompanySettings;
+  repair?: RepairData;
 }
 
 export interface RegisterPayload {
@@ -170,6 +174,8 @@ export interface RegisterPayload {
   email: string;
   phone: string;
   companyName: string;
+  companyVertical: CompanyVertical;
+  repairSite?: RepairSiteDraft;
   password: string;
   confirmPassword: string;
 }
@@ -205,4 +211,213 @@ export interface TeamMemberPayload {
   password?: string;
   confirmPassword?: string;
   avatarDataUrl?: string;
+}
+
+export type RepairProjectStatus = 'новый' | 'дизайн' | 'ремонт' | 'сдача' | 'завершен';
+export type RepairStageStatus = 'не начат' | 'в работе' | 'на проверке' | 'завершен';
+export type RepairTaskStatus = 'новая' | 'в работе' | 'на проверке' | 'завершена';
+export type RepairPaymentStatus = 'ожидается' | 'оплачено';
+export type RepairMaterialStatus = 'нужно купить' | 'заказано' | 'доставлено' | 'оплачено';
+
+export interface RepairClient {
+  id: string;
+  name: string;
+  phone: string;
+  whatsapp: string;
+  email: string;
+}
+
+export interface RepairSiteService {
+  title: string;
+  text: string;
+}
+
+export interface RepairSiteSettings {
+  username: string;
+  brandName: string;
+  headline: string;
+  subheadline: string;
+  cities: string[];
+  phone: string;
+  whatsapp: string;
+  address: string;
+  heroImageUrl: string;
+  primaryColor: string;
+  accentColor: string;
+  services: RepairSiteService[];
+  advantages: string[];
+  process: string[];
+}
+
+export interface RepairSiteDraft {
+  username?: string;
+  brandName?: string;
+  headline?: string;
+  subheadline?: string;
+  cities?: string;
+  phone?: string;
+  whatsapp?: string;
+  address?: string;
+  heroImageUrl?: string;
+  primaryColor?: string;
+  accentColor?: string;
+  servicesText?: string;
+}
+
+export interface RepairProject {
+  id: string;
+  title: string;
+  clientId: string;
+  address: string;
+  city: string;
+  area: number;
+  objectType: string;
+  service: string;
+  status: RepairProjectStatus;
+  startDate: string;
+  dueDate: string;
+  managerId: string;
+  designerId: string;
+  foremanId: string;
+  budget: number;
+  paid: number;
+  progress: number;
+}
+
+export interface RepairStage {
+  id: string;
+  projectId: string;
+  title: string;
+  status: RepairStageStatus;
+  startDate: string;
+  deadline: string;
+  responsibleId: string;
+  description: string;
+  progress: number;
+  visibleForClient: boolean;
+}
+
+export interface RepairTask {
+  id: string;
+  projectId: string;
+  stageId: string;
+  title: string;
+  description: string;
+  assigneeId: string;
+  trade: string;
+  deadline: string;
+  status: RepairTaskStatus;
+  priority: 'низкий' | 'средний' | 'высокий';
+  location: string;
+}
+
+export interface RepairMaterial {
+  id: string;
+  projectId: string;
+  title: string;
+  category: string;
+  quantity: string;
+  price: number;
+  supplier: string;
+  status: RepairMaterialStatus;
+}
+
+export interface RepairPayment {
+  id: string;
+  projectId: string;
+  amount: number;
+  date: string;
+  type: 'предоплата' | 'этап' | 'финальный платеж';
+  status: RepairPaymentStatus;
+}
+
+export interface RepairPhotoReport {
+  id: string;
+  projectId: string;
+  stageId: string;
+  title: string;
+  imageUrl?: string;
+  media?: RepairReportMedia[];
+  date: string;
+  description: string;
+  visibleForClient: boolean;
+}
+
+export interface RepairReportMedia {
+  id: string;
+  type: 'image' | 'video';
+  url: string;
+  name?: string;
+}
+
+export interface RepairDocument {
+  id: string;
+  projectId: string;
+  stageId?: string;
+  title: string;
+  type: string;
+  visibleForClient: boolean;
+  uploadedAt: string;
+  content?: string;
+}
+
+export interface RepairDocumentTemplate {
+  id: string;
+  title: string;
+  type: string;
+  fields: string[];
+  body: string;
+}
+
+export interface RepairApproval {
+  id: string;
+  projectId: string;
+  title: string;
+  status: 'ожидает' | 'одобрено' | 'нужны правки' | 'вопрос';
+  comment?: string;
+  updatedAt: string;
+}
+
+export interface RepairChatMessage {
+  id: string;
+  projectId: string;
+  threadId?: string;
+  authorId: string;
+  authorName: string;
+  body: string;
+  attachments?: RepairChatAttachment[];
+  createdAt: string;
+}
+
+export interface RepairChatAttachment {
+  id: string;
+  type: 'image' | 'document';
+  name: string;
+  url: string;
+  createdAt: string;
+}
+
+export interface RepairChatThread {
+  id: string;
+  projectId: string;
+  title: string;
+  memberIds: string[];
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface RepairData {
+  site: RepairSiteSettings;
+  clients: RepairClient[];
+  projects: RepairProject[];
+  stages: RepairStage[];
+  tasks: RepairTask[];
+  materials: RepairMaterial[];
+  payments: RepairPayment[];
+  photoReports: RepairPhotoReport[];
+  documents: RepairDocument[];
+  documentTemplates: RepairDocumentTemplate[];
+  approvals: RepairApproval[];
+  chatThreads: RepairChatThread[];
+  chatMessages: RepairChatMessage[];
 }

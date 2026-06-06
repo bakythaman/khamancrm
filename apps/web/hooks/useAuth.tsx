@@ -6,7 +6,7 @@ import { hashPassword } from '@/lib/auth/password';
 import { storageKeys } from '@/lib/storage/keys';
 import { readJson, readString, removeItem, writeJson, writeString } from '@/lib/storage/local-store';
 import type { Company, CompanyData, Language, LoginPayload, RegisterPayload, TeamMemberPayload, User } from '@/lib/storage/types';
-import { createEmptyCompanyData } from '@/lib/mock-data/seed';
+import { createCompanyDataForVertical, createEmptyCompanyData, createGulviraCompanyData } from '@/lib/mock-data/seed';
 import { useTranslation } from '@/hooks/useTranslation';
 
 interface AuthContextValue {
@@ -14,7 +14,7 @@ interface AuthContextValue {
   company: Company | null;
   loading: boolean;
   register: (payload: RegisterPayload) => Promise<void>;
-  login: (payload: LoginPayload) => Promise<void>;
+  login: (payload: LoginPayload) => Promise<{ user: User; company: Company | null }>;
   requestPasswordReset: (email: string) => Promise<void>;
   resetPassword: (payload: { email: string; code: string; password: string }) => Promise<void>;
   logout: () => void;
@@ -70,7 +70,7 @@ function readUsers() {
 }
 
 function readCompanies() {
-  return readJson<Company[]>(storageKeys.companies, []);
+  return readJson<Company[]>(storageKeys.companies, []).map(normalizeCompany);
 }
 
 function mapApiUser(payload: ApiAuthResponse | ApiMeResponse): { user: User; company: Company } {
@@ -85,6 +85,7 @@ function mapApiUser(payload: ApiAuthResponse | ApiMeResponse): { user: User; com
   const company: Company = {
     id: organization.id,
     name: organization.name,
+    vertical: 'sales',
     createdAt: new Date().toISOString(),
   };
   const role = apiUser.role.toLowerCase();
@@ -111,6 +112,169 @@ function normalizeUser(user: User): User {
     role: user.role ?? 'manager',
     active: user.active ?? true,
   };
+}
+
+function normalizeCompany(company: Company): Company {
+  return {
+    ...company,
+    vertical: company.vertical ?? 'sales',
+  };
+}
+
+async function ensureStarterRepairClient() {
+  const users = readUsers().map(normalizeUser);
+  const companies = readCompanies();
+  const company: Company = {
+    id: 'company-gulvira-group',
+    name: 'Gulvira Group',
+    vertical: 'repair',
+    createdAt: '2026-06-05T00:00:00.000Z',
+  };
+  const passwordHash = await hashPassword('gulvira123');
+  const existingOwner = users.find((user) => user.email === 'director@gulvira.kz');
+  const owner: User =
+    existingOwner ?? {
+      id: 'user-gulvira-director',
+      name: 'Гульвира Бакытжанкызы',
+      email: 'director@gulvira.kz',
+      phone: '+7 775 669 10 03',
+      role: 'owner',
+      companyId: company.id,
+      language: 'ru',
+      passwordHash,
+      active: true,
+    };
+  const starterUsers: User[] = [
+    {
+      ...owner,
+      companyId: company.id,
+      language: owner.language ?? 'ru',
+      passwordHash: owner.passwordHash || passwordHash,
+      active: true,
+    },
+    {
+      id: 'gulvira-designer',
+      name: 'Диана Ермек',
+      email: 'designer@gulvira.kz',
+      phone: '+7 777 100 20 30',
+      role: 'designer',
+      companyId: company.id,
+      language: 'ru',
+      passwordHash,
+      active: true,
+    },
+    {
+      id: 'gulvira-foreman',
+      name: 'Руслан Омар',
+      email: 'foreman@gulvira.kz',
+      phone: '+7 701 330 60 77',
+      role: 'foreman',
+      companyId: company.id,
+      language: 'ru',
+      passwordHash,
+      active: true,
+    },
+    {
+      id: 'gulvira-worker',
+      name: 'Аскар Электрик',
+      email: 'worker@gulvira.kz',
+      phone: '+7 701 550 11 22',
+      role: 'worker',
+      companyId: company.id,
+      language: 'ru',
+      passwordHash,
+      active: true,
+    },
+  ];
+  const starterEmails = new Set(starterUsers.map((user) => user.email));
+  const nextUsers = [
+    ...users.filter((user) => !starterEmails.has(user.email)),
+    ...starterUsers.map((starterUser) => {
+      const existing = users.find((user) => user.email === starterUser.email);
+      return existing
+        ? {
+            ...existing,
+            ...starterUser,
+            passwordHash: existing.passwordHash || starterUser.passwordHash,
+            avatarDataUrl: existing.avatarDataUrl,
+          }
+        : starterUser;
+    }),
+  ];
+
+  writeJson(storageKeys.companies, [...companies.filter((item) => item.id !== company.id), company]);
+  writeJson(storageKeys.users, nextUsers);
+  const starterCompanyData = createGulviraCompanyData(starterUsers[0] ?? owner);
+  const existingCompanyData = readJson<CompanyData | null>(storageKeys.companyData(company.id), null);
+  if (!existingCompanyData) {
+    writeJson(storageKeys.companyData(company.id), starterCompanyData);
+  } else {
+    const starterRepair = starterCompanyData.repair;
+    const existingRepair = existingCompanyData.repair;
+    const existingSite = existingRepair?.site;
+    const shouldUseGulviraSite = !existingSite || existingSite.phone === '+7 700 000 00 00';
+    const starterTasksById = new Map(starterRepair?.tasks.map((task) => [task.id, task]) ?? []);
+    const existingTaskIds = new Set(existingRepair?.tasks.map((task) => task.id) ?? []);
+    const teamMembersById = new Map(starterCompanyData.teamMembers.map((member) => [member.id, member]));
+    existingCompanyData.teamMembers.forEach((member) => teamMembersById.set(member.id, member));
+
+    writeJson(storageKeys.companyData(company.id), {
+      ...existingCompanyData,
+      teamMembers: Array.from(teamMembersById.values()),
+      repair: starterRepair
+        ? {
+            ...starterRepair,
+            ...(existingRepair ?? {}),
+            site: shouldUseGulviraSite
+              ? starterRepair.site
+              : {
+                  ...starterRepair.site,
+                  ...existingSite,
+                  services: existingSite.services?.length ? existingSite.services : starterRepair.site.services,
+                  advantages: existingSite.advantages?.length ? existingSite.advantages : starterRepair.site.advantages,
+                  process: existingSite.process?.length ? existingSite.process : starterRepair.site.process,
+                  cities: existingSite.cities?.length ? existingSite.cities : starterRepair.site.cities,
+                },
+            documents: existingRepair?.documents?.length ? existingRepair.documents : starterRepair.documents,
+            approvals: existingRepair?.approvals?.length ? existingRepair.approvals : starterRepair.approvals,
+            chatMessages: existingRepair?.chatMessages?.length ? existingRepair.chatMessages : starterRepair.chatMessages,
+            tasks: existingRepair?.tasks?.length
+              ? [
+                  ...existingRepair.tasks.map((task) => {
+                    const starterTask = starterTasksById.get(task.id);
+                    return starterTask?.id === 'task-atilla-electrics'
+                      ? {
+                          ...task,
+                          assigneeId: starterTask.assigneeId,
+                          trade: starterTask.trade,
+                        }
+                      : task;
+                  }),
+                  ...starterRepair.tasks.filter((task) => !existingTaskIds.has(task.id)),
+                ]
+              : starterRepair.tasks,
+            photoReports: existingRepair?.photoReports?.length
+              ? existingRepair.photoReports.map((report) => ({
+                  ...report,
+                  imageUrl: report.imageUrl ?? starterRepair.photoReports.find((item) => item.id === report.id)?.imageUrl,
+                  media: report.media?.length
+                    ? report.media
+                    : (report.imageUrl ?? starterRepair.photoReports.find((item) => item.id === report.id)?.imageUrl)
+                      ? [
+                          {
+                            id: `${report.id}-image`,
+                            type: 'image' as const,
+                            url: report.imageUrl ?? starterRepair.photoReports.find((item) => item.id === report.id)?.imageUrl ?? '',
+                            name: report.title,
+                          },
+                        ]
+                      : [],
+                }))
+              : starterRepair.photoReports,
+          }
+        : existingRepair,
+    });
+  }
 }
 
 function markUserPresence(user: User, event: 'login' | 'logout' | 'seen') {
@@ -168,17 +332,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    const sessionUserId = readString(storageKeys.sessionUserId);
-    const user = readUsers().map(normalizeUser).find((item) => item.id === sessionUserId) ?? null;
-    const userCompany = user ? readCompanies().find((item) => item.id === user.companyId) ?? null : null;
+    void (async () => {
+      await ensureStarterRepairClient();
 
-	    if (user) {
-	      markUserPresence(user, 'seen');
-	      setCurrentUser(user);
-	      setLanguage(user.language);
-    }
-    setCompany(userCompany);
-    setLoading(false);
+      const sessionUserId = readString(storageKeys.sessionUserId);
+      const user = readUsers().map(normalizeUser).find((item) => item.id === sessionUserId) ?? null;
+      const userCompany = user ? readCompanies().find((item) => item.id === user.companyId) ?? null : null;
+
+      if (user) {
+        markUserPresence(user, 'seen');
+        setCurrentUser(user);
+        setLanguage(user.language);
+      }
+      setCompany(userCompany);
+      setLoading(false);
+    })();
   }, [setLanguage]);
 
   const register = useCallback(
@@ -211,6 +379,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const companyRecord: Company = {
         id: companyId,
         name: payload.companyName.trim(),
+        vertical: payload.companyVertical,
         createdAt: new Date().toISOString(),
       };
       const user: User = {
@@ -227,7 +396,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 	      writeJson(storageKeys.users, [...users, user]);
 	      writeJson(storageKeys.companies, [...readCompanies(), companyRecord]);
-	      writeJson(storageKeys.companyData(companyId), createEmptyCompanyData(user));
+	      writeJson(storageKeys.companyData(companyId), createCompanyDataForVertical(user, companyRecord.vertical, companyRecord.name, payload.repairSite));
 	      markUserPresence(user, 'login');
 	      writeString(storageKeys.sessionUserId, user.id);
 
@@ -251,7 +420,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 	        setCurrentUser(mapped.user);
         setCompany(mapped.company);
         setLanguage(mapped.user.language);
-        return;
+        return { user: mapped.user, company: mapped.company };
       }
 
       const email = normalizeEmail(payload.email);
@@ -272,6 +441,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 	      setCurrentUser(user);
       setCompany(userCompany);
       setLanguage(user.language);
+      return { user, company: userCompany };
     },
     [setLanguage],
   );

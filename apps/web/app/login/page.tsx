@@ -10,10 +10,11 @@ import { Input } from '@/components/ui/input';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/useToast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { isRepairPortalRole, landingPathForUser } from '@/lib/repair/roles';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { currentUser, login, requestPasswordReset, resetPassword } = useAuth();
+  const { currentUser, company, loading: authLoading, login, requestPasswordReset, resetPassword } = useAuth();
   const { showToast } = useToast();
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
@@ -25,8 +26,8 @@ export default function LoginPage() {
   const [resetForm, setResetForm] = useState({ email: '', code: '', password: '', confirmPassword: '' });
 
   useEffect(() => {
-    if (currentUser) router.replace('/dashboard');
-  }, [currentUser, router]);
+    if (!authLoading && currentUser && company) router.replace(landingPathForUser(currentUser, company));
+  }, [authLoading, company, currentUser, router]);
 
   useEffect(() => {
     const next = new URLSearchParams(window.location.search).get('next');
@@ -47,9 +48,15 @@ export default function LoginPage() {
 
     try {
       setLoading(true);
-      await login(form);
+      const session = await login(form);
       showToast(t('auth.loggedIn'));
-      router.push(nextPath);
+      const roleLandingPath = landingPathForUser(session.user, session.company);
+      const destination = isRepairPortalRole(session.user.role)
+        ? roleLandingPath
+        : nextPath !== '/dashboard' && nextPath !== '/repair'
+          ? nextPath
+          : roleLandingPath;
+      router.replace(destination);
     } catch (caught) {
       const key = caught instanceof Error ? caught.message : 'validation.invalidCredentials';
       setError(t(key));

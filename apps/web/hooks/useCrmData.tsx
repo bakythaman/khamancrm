@@ -7,6 +7,7 @@ import {
   createDefaultSettings,
   createDefaultTeamGroups,
   createEmptyCompanyData,
+  createEmptyRepairData,
   defaultTeamGroupIds,
 } from '@/lib/mock-data/seed';
 import { createDefaultRoles, isDefaultRole } from '@/lib/permissions';
@@ -14,6 +15,7 @@ import { storageKeys } from '@/lib/storage/keys';
 import { readJson, writeJson } from '@/lib/storage/local-store';
 import type {
   CompanyData,
+  CompanyVertical,
   CompanySettings,
   CrmTask,
   Deal,
@@ -24,6 +26,7 @@ import type {
   PipelineAutomation,
   PipelineAutomationType,
   PipelineStage,
+  RepairData,
   RoleDefinition,
   TaskPayload,
   TeamGroup,
@@ -63,6 +66,7 @@ interface CrmDataContextValue extends CompanyData {
   createRole: (name: string, permissions: Permission[]) => RoleDefinition;
   updateRole: (id: string, payload: Partial<Pick<RoleDefinition, 'name' | 'permissions'>>) => void;
   deleteRole: (id: string) => boolean;
+  updateRepairData: (updater: (repair: RepairData) => RepairData) => void;
 }
 
 const emptyData: CompanyData = {
@@ -125,7 +129,45 @@ function syncDefaultGroups(groups: TeamGroup[], members: TeamMember[]) {
   });
 }
 
-function migrateCompanyData(data: CompanyData | null, owner: User): CompanyData {
+function normalizeRepairData(repair: Partial<RepairData> | undefined, companyName?: string): RepairData {
+  const fallback = createEmptyRepairData(companyName);
+  const site = {
+    ...fallback.site,
+    ...(repair?.site ?? {}),
+    username: repair?.site?.username?.trim() || fallback.site.username,
+    services: repair?.site?.services?.length ? repair.site.services : fallback.site.services,
+    advantages: repair?.site?.advantages?.length ? repair.site.advantages : fallback.site.advantages,
+    process: repair?.site?.process?.length ? repair.site.process : fallback.site.process,
+    cities: repair?.site?.cities?.length ? repair.site.cities : fallback.site.cities,
+  };
+
+  return {
+    ...fallback,
+    ...(repair ?? {}),
+    site,
+    clients: repair?.clients ?? [],
+    projects: repair?.projects ?? [],
+    stages: repair?.stages ?? [],
+    tasks: repair?.tasks ?? [],
+    materials: repair?.materials ?? [],
+    payments: repair?.payments ?? [],
+    photoReports: (repair?.photoReports ?? []).map((report) => ({
+      ...report,
+      media: report.media?.length
+        ? report.media
+        : report.imageUrl
+          ? [{ id: `${report.id}-image`, type: 'image' as const, url: report.imageUrl, name: report.title }]
+          : [],
+    })),
+    documents: repair?.documents ?? [],
+    documentTemplates: repair?.documentTemplates?.length ? repair.documentTemplates : fallback.documentTemplates,
+    approvals: repair?.approvals ?? [],
+    chatThreads: repair?.chatThreads ?? [],
+    chatMessages: (repair?.chatMessages ?? []).map((message) => ({ ...message, attachments: message.attachments ?? [] })),
+  };
+}
+
+function migrateCompanyDataForVertical(data: CompanyData | null, owner: User, vertical: CompanyVertical, companyName?: string): CompanyData {
   const base = data ?? createEmptyCompanyData(owner);
   const createdAt = new Date().toISOString();
   const pipelineStages = (base.pipelineStages?.length ? base.pipelineStages : createDefaultPipelineStages(createdAt))
@@ -217,11 +259,12 @@ function migrateCompanyData(data: CompanyData | null, owner: User): CompanyData 
       ...(base.settings ?? {}),
       automation: base.settings?.automation ?? createDefaultSettings().automation,
     },
+    repair: vertical === 'repair' ? normalizeRepairData(base.repair, companyName) : undefined,
   };
 }
 
 export function CrmDataProvider({ children }: { children: React.ReactNode }) {
-  const { currentUser, createCompanyUser, updateCompanyUser, deleteCompanyUser } = useAuth();
+  const { currentUser, company, createCompanyUser, updateCompanyUser, deleteCompanyUser } = useAuth();
   const [data, setData] = useState<CompanyData>(emptyData);
   const [loading, setLoading] = useState(true);
 
@@ -234,11 +277,11 @@ export function CrmDataProvider({ children }: { children: React.ReactNode }) {
 
     const key = storageKeys.companyData(currentUser.companyId);
     const companyData = readJson<CompanyData | null>(key, null);
-    const nextData = migrateCompanyData(companyData, currentUser);
+    const nextData = migrateCompanyDataForVertical(companyData, currentUser, company?.vertical ?? 'sales', company?.name);
     writeJson(key, nextData);
     setData(nextData);
     setLoading(false);
-  }, [currentUser]);
+  }, [company?.name, company?.vertical, currentUser]);
 
   const persist = useCallback(
     (updater: (current: CompanyData) => CompanyData) => {
@@ -693,6 +736,16 @@ export function CrmDataProvider({ children }: { children: React.ReactNode }) {
     [persist],
   );
 
+  const updateRepairData = useCallback(
+    (updater: (repair: RepairData) => RepairData) => {
+      persist((current) => ({
+        ...current,
+        repair: updater(current.repair ?? createEmptyRepairData(company?.name)),
+      }));
+    },
+    [company?.name, persist],
+  );
+
   const createRole = useCallback(
     (name: string, permissions: Permission[]) => {
       const role: RoleDefinition = {
@@ -765,6 +818,7 @@ export function CrmDataProvider({ children }: { children: React.ReactNode }) {
       createRole,
       updateRole,
       deleteRole,
+      updateRepairData,
     }),
     [
       addComment,
@@ -795,6 +849,7 @@ export function CrmDataProvider({ children }: { children: React.ReactNode }) {
       updateRole,
       updateTask,
       updateTeamMember,
+      updateRepairData,
     ],
   );
 

@@ -35,6 +35,8 @@ const managerPermissions: Permission[] = [
 
 const adminPermissions: Permission[] = allPermissions.filter((permission) => permission !== 'manage_roles');
 
+const repairStaffPermissions: Permission[] = ['view_settings'];
+
 export function createDefaultRoles(createdAt = new Date().toISOString()): RoleDefinition[] {
   return [
     {
@@ -58,6 +60,27 @@ export function createDefaultRoles(createdAt = new Date().toISOString()): RoleDe
       isDefault: true,
       createdAt,
     },
+    {
+      id: 'designer',
+      name: 'Дизайнер',
+      permissions: repairStaffPermissions,
+      isDefault: true,
+      createdAt,
+    },
+    {
+      id: 'foreman',
+      name: 'Прораб',
+      permissions: repairStaffPermissions,
+      isDefault: true,
+      createdAt,
+    },
+    {
+      id: 'worker',
+      name: 'Рабочий',
+      permissions: repairStaffPermissions,
+      isDefault: true,
+      createdAt,
+    },
   ];
 }
 
@@ -73,5 +96,5 @@ export function hasPermission(user: User | null | undefined, roles: RoleDefiniti
 }
 
 export function isDefaultRole(roleId: string) {
-  return roleId === 'owner' || roleId === 'admin' || roleId === 'manager';
+  return roleId === 'owner' || roleId === 'admin' || roleId === 'manager' || roleId === 'designer' || roleId === 'foreman' || roleId === 'worker';
 }
