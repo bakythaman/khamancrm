@@ -1,7 +1,7 @@
 import { createGulviraRepairData } from '@/lib/mock-data/seed';
 import { slugifyLandingUsername } from '@/lib/mock-data/seed';
 import { storageKeys } from '@/lib/storage/keys';
-import { readJson } from '@/lib/storage/local-store';
+import { readJson, writeJson } from '@/lib/storage/local-store';
 import type { Company, CompanyData, RepairData, RepairProject, User } from '@/lib/storage/types';
 
 const fallbackOwner: User = {
@@ -51,6 +51,38 @@ export function getPublicRepairDataByUsername(username?: string | null) {
 
   if (target === 'gulvira') return createFallbackRepairPlatform();
   return null;
+}
+
+export function updatePublicRepairDataByUsername(username: string | null | undefined, updater: (repair: RepairData) => RepairData) {
+  if (!username?.trim()) return null;
+  const target = slugifyLandingUsername(username ?? '');
+
+  const companies = readJson<Company[]>(storageKeys.companies, []);
+  for (const company of companies) {
+    if (company.vertical !== 'repair') continue;
+    const key = storageKeys.companyData(company.id);
+    const data = readJson<CompanyData | null>(key, null);
+    const repair = data?.repair;
+    if (!data || !repair?.site) continue;
+    const siteUsername = slugifyLandingUsername(repair.site.username || company.name);
+    if (siteUsername !== target) continue;
+
+    const nextRepair = updater(getPublicRepairData(repair, company.name));
+    writeJson(key, { ...data, repair: nextRepair });
+    return nextRepair;
+  }
+
+  return null;
+}
+
+export function repairLandingPath(username?: string | null) {
+  const slug = slugifyLandingUsername(username ?? '', '');
+  return slug ? `/${slug}` : '/site';
+}
+
+export function repairClientPath(username?: string | null) {
+  const slug = slugifyLandingUsername(username ?? '', '');
+  return slug ? `/client?u=${encodeURIComponent(slug)}` : '/client';
 }
 
 export function projectDuration(project: RepairProject) {

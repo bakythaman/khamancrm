@@ -6,18 +6,28 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { useAuth } from '@/hooks/useAuth';
 import { useCrmData } from '@/hooks/useCrmData';
+import { useResolvedMediaUrl } from '@/hooks/useResolvedMediaUrl';
 import { formatAmount } from '@/lib/i18n/format';
-import { getPublicRepairData } from '@/lib/repair/platform';
+import { getPublicRepairData, getPublicRepairDataByUsername, repairLandingPath, updatePublicRepairDataByUsername } from '@/lib/repair/platform';
 import type { RepairApproval, RepairChatAttachment, RepairData, RepairReportMedia } from '@/lib/storage/types';
 
 const clientSessionKey = 'khaman.repairClientSession';
 
-function getClientSession() {
+function clientSessionStorageKey(username?: string) {
+  return `${clientSessionKey}.${username || 'default'}`;
+}
+
+function getClientSession(username?: string) {
   if (typeof window === 'undefined') return null;
-  return window.localStorage.getItem(clientSessionKey);
+  return window.localStorage.getItem(clientSessionStorageKey(username));
+}
+
+function normalizePhone(value: string) {
+  return value.replace(/\D/g, '');
 }
 
 function formatDate(value: string) {
@@ -41,21 +51,30 @@ function reportMediaItems(report: RepairData['photoReports'][number]): RepairRep
 export default function RepairClientPortalPage() {
   const { company } = useAuth();
   const { repair, updateRepairData } = useCrmData();
-  const platform = getPublicRepairData(company?.vertical === 'repair' ? repair : undefined, company?.name);
+  const [landingUsername, setLandingUsername] = useState<string | null>(null);
+  const [publicPlatform, setPublicPlatform] = useState<RepairData | null>(null);
+  const platform = publicPlatform ?? getPublicRepairData(company?.vertical === 'repair' ? repair : undefined, company?.name);
   const [clientId, setClientId] = useState<string | null>(null);
-  const [selectedClient, setSelectedClient] = useState(platform.clients[0]?.id ?? '');
+  const [loginForm, setLoginForm] = useState({ name: '', phone: '', email: '' });
+  const [loginError, setLoginError] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [question, setQuestion] = useState('');
   const [chatText, setChatText] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<RepairChatAttachment[]>([]);
+  const landingPath = repairLandingPath(platform.site.username);
 
   useEffect(() => {
-    setClientId(getClientSession());
+    const username = new URLSearchParams(window.location.search).get('u');
+    setLandingUsername(username);
   }, []);
 
   useEffect(() => {
-    if (!selectedClient && platform.clients[0]) setSelectedClient(platform.clients[0].id);
-  }, [platform.clients, selectedClient]);
+    setPublicPlatform(landingUsername ? getPublicRepairDataByUsername(landingUsername) : null);
+  }, [landingUsername]);
+
+  useEffect(() => {
+    setClientId(getClientSession(platform.site.username));
+  }, [platform.site.username]);
 
   const client = platform.clients.find((item) => item.id === clientId);
   const clientProjects = platform.projects.filter((project) => project.clientId === clientId);
@@ -76,21 +95,47 @@ export default function RepairClientPortalPage() {
   const projectThread = platform.chatThreads.find((thread) => thread.projectId === activeProject?.id);
   const messages = platform.chatMessages.filter((message) => message.projectId === activeProject?.id);
 
+  function mutateRepairData(updater: (repair: RepairData) => RepairData) {
+    if (company?.vertical === 'repair') {
+      updateRepairData(updater);
+      return;
+    }
+
+    const nextRepair = updatePublicRepairDataByUsername(platform.site.username, updater);
+    if (nextRepair) setPublicPlatform(nextRepair);
+  }
+
   function login(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    window.localStorage.setItem(clientSessionKey, selectedClient);
-    setClientId(selectedClient);
+    const email = loginForm.email.trim().toLowerCase();
+    const phone = normalizePhone(loginForm.phone);
+    const name = loginForm.name.trim();
+    if (!name || !email || !phone) {
+      setLoginError('Введите имя, телефон и почту, которые компания указала для вашего объекта.');
+      return;
+    }
+
+    const foundClient = platform.clients.find(
+      (item) => item.email.trim().toLowerCase() === email && [item.phone, item.whatsapp].some((value) => normalizePhone(value) === phone),
+    );
+    if (!foundClient) {
+      setLoginError('Клиент с такими данными не найден. Проверьте телефон и почту.');
+      return;
+    }
+
+    window.localStorage.setItem(clientSessionStorageKey(platform.site.username), foundClient.id);
+    setClientId(foundClient.id);
+    setLoginError('');
   }
 
   function logout() {
-    window.localStorage.removeItem(clientSessionKey);
+    window.localStorage.removeItem(clientSessionStorageKey(platform.site.username));
     setClientId(null);
     setSelectedProjectId('');
   }
 
   function updateApproval(approval: RepairApproval, status: RepairApproval['status'], comment?: string) {
-    if (company?.vertical !== 'repair') return;
-    updateRepairData((current) => ({
+    mutateRepairData((current) => ({
       ...current,
       approvals: current.approvals.map((item) =>
         item.id === approval.id
@@ -124,9 +169,9 @@ export default function RepairClientPortalPage() {
 
   function sendClientMessage(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!activeProject || !client || company?.vertical !== 'repair') return;
+    if (!activeProject || !client) return;
     if (!chatText.trim() && !pendingAttachments.length) return;
-    updateRepairData((current) => ({
+    mutateRepairData((current) => ({
       ...current,
       chatMessages: [
         ...current.chatMessages,
@@ -146,7 +191,7 @@ export default function RepairClientPortalPage() {
     setPendingAttachments([]);
   }
 
-  if (!client || !activeProject) {
+  if (!client) {
     return (
       <main className="min-h-screen bg-neutral-950 text-white">
         <div className="mx-auto flex min-h-screen max-w-7xl items-center px-4 py-12 md:px-6">
@@ -159,7 +204,7 @@ export default function RepairClientPortalPage() {
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Button asChild variant="outline" className="border-white/20 bg-white/10 text-white hover:bg-white/20">
-                  <Link href="/site">На лендинг</Link>
+                  <Link href={landingPath}>На лендинг</Link>
                 </Button>
                 <Button asChild>
                   <Link href="/login">Вход команды</Link>
@@ -169,19 +214,14 @@ export default function RepairClientPortalPage() {
             <Card className="bg-white text-neutral-950">
               <CardHeader className="block">
                 <CardTitle className="text-xl">Войти как клиент</CardTitle>
-                <p className="mt-2 text-sm text-neutral-500">Демо-доступ к одному из клиентских проектов.</p>
+                <p className="mt-2 text-sm text-neutral-500">Введите имя, телефон и почту, которые ремонтная компания добавила к вашему объекту.</p>
               </CardHeader>
               <CardContent>
                 <form onSubmit={login} className="space-y-4">
-                  <select
-                    className="flex h-10 w-full rounded-md border bg-white px-3 text-sm text-neutral-950 outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
-                    value={selectedClient}
-                    onChange={(event) => setSelectedClient(event.target.value)}
-                  >
-                    {platform.clients.map((item) => (
-                      <option value={item.id} key={item.id}>{item.name}</option>
-                    ))}
-                  </select>
+                  {loginError ? <p className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">{loginError}</p> : null}
+                  <Input placeholder="Имя" value={loginForm.name} onChange={(event) => setLoginForm({ ...loginForm, name: event.target.value })} />
+                  <Input placeholder="Телефон" value={loginForm.phone} onChange={(event) => setLoginForm({ ...loginForm, phone: event.target.value })} />
+                  <Input placeholder="Почта" type="email" value={loginForm.email} onChange={(event) => setLoginForm({ ...loginForm, email: event.target.value })} />
                   <Button type="submit" className="w-full">Открыть кабинет</Button>
                 </form>
               </CardContent>
@@ -192,12 +232,31 @@ export default function RepairClientPortalPage() {
     );
   }
 
+  if (!activeProject) {
+    return (
+      <main className="min-h-screen bg-[#f7f5f0]">
+        <div className="mx-auto flex min-h-screen max-w-3xl items-center px-4 py-12">
+          <Card className="w-full">
+            <CardHeader className="block">
+              <CardTitle className="text-2xl">Проект еще не привязан</CardTitle>
+              <p className="mt-2 text-sm text-neutral-500">Аккаунт клиента создан, но менеджер еще не связал его с объектом в разделе “Клиенты”.</p>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-2">
+              <Button asChild variant="outline"><Link href={landingPath}>Лендинг</Link></Button>
+              <Button onClick={logout}>Выйти</Button>
+            </CardContent>
+          </Card>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#f7f5f0]">
       <header className="border-b bg-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-5 md:flex-row md:items-center md:justify-between md:px-6">
           <div>
-            <Link href="/site" className="text-xl font-semibold text-neutral-950">{platform.site.brandName}</Link>
+            <Link href={landingPath} className="text-xl font-semibold text-neutral-950">{platform.site.brandName}</Link>
             <p className="mt-1 text-sm text-neutral-500">Личный кабинет · {client.name}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -212,7 +271,7 @@ export default function RepairClientPortalPage() {
                 ))}
               </select>
             ) : null}
-            <Button asChild variant="outline"><Link href="/site">Лендинг</Link></Button>
+            <Button asChild variant="outline"><Link href={landingPath}>Лендинг</Link></Button>
             <Button asChild variant="outline"><Link href="/login">Вход команды</Link></Button>
             <Button size="icon" variant="ghost" onClick={logout} title="Выйти">
               <LogOut className="h-4 w-4" aria-hidden />
@@ -300,12 +359,7 @@ export default function RepairClientPortalPage() {
                 <article key={report.id} className="overflow-hidden rounded-lg border">
                   <div className="grid grid-cols-2 gap-1 bg-neutral-100 p-1">
                     {reportMediaItems(report).slice(0, 4).map((item) => (
-                      item.type === 'video' ? (
-                        <video key={item.id} className="h-32 w-full rounded object-cover" controls src={item.url} title={item.name ?? report.title} />
-                      ) : (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img key={item.id} src={item.url} alt={item.name ?? report.title} className="h-32 w-full rounded object-cover" />
-                      )
+                      <ClientReportMedia key={item.id} media={item} title={report.title} />
                     ))}
                     {!reportMediaItems(report).length ? <div className="col-span-2 flex h-48 items-center justify-center text-neutral-400">Без медиа</div> : null}
                   </div>
@@ -459,6 +513,30 @@ function ClientStat({ icon: Icon, label, value }: { icon: typeof Home; label: st
       </div>
       <p className="mt-2 text-sm font-semibold text-neutral-950">{value}</p>
     </div>
+  );
+}
+
+function ClientReportMedia({ media, title }: { media: RepairReportMedia; title: string }) {
+  const src = useResolvedMediaUrl(media.url);
+
+  if (media.type === 'video') {
+    return (
+      <div className="relative h-32 overflow-hidden rounded bg-neutral-950">
+        {src ? <video className="h-full w-full object-cover" controls playsInline preload="metadata" src={src} title={media.name ?? title} /> : null}
+        <span className="pointer-events-none absolute left-2 top-2 rounded bg-black/70 px-2 py-1 text-[11px] font-semibold text-white">
+          Видео{media.name ? ` · ${media.name}` : ''}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    src ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={src} alt={media.name ?? title} className="h-32 w-full rounded object-cover" />
+    ) : (
+      <div className="flex h-32 items-center justify-center rounded bg-neutral-100 text-xs text-neutral-500">Файл сохранен</div>
+    )
   );
 }
 

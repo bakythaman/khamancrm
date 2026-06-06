@@ -14,6 +14,7 @@ import { useCrmData } from '@/hooks/useCrmData';
 import { useToast } from '@/hooks/useToast';
 import { createDefaultRepairSiteSettings, slugifyLandingUsername } from '@/lib/mock-data/seed';
 import { hasPermission } from '@/lib/permissions';
+import { repairLandingPath } from '@/lib/repair/platform';
 import type { RepairSiteService, RepairSiteSettings } from '@/lib/storage/types';
 
 function servicesToText(services: RepairSiteService[]) {
@@ -53,7 +54,8 @@ export default function SiteBuilderPage() {
   const [servicesText, setServicesText] = useState(servicesToText(initialSite.services));
   const [advantagesText, setAdvantagesText] = useState(initialSite.advantages.join(', '));
   const [processText, setProcessText] = useState(initialSite.process.join(', '));
-  const publicLandingPath = `/site?u=${slugifyLandingUsername(draft.username || draft.brandName || company?.name)}`;
+  const [savedAt, setSavedAt] = useState('');
+  const publicLandingPath = repairLandingPath(slugifyLandingUsername(draft.username || draft.brandName || company?.name));
 
   useEffect(() => {
     setDraft(initialSite);
@@ -78,13 +80,14 @@ export default function SiteBuilderPage() {
     const nextSite = buildNextSite();
     updateRepairData((current) => ({ ...current, site: nextSite }));
     setDraft(nextSite);
+    setSavedAt(new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }));
     showToast('Лендинг обновлен');
     return nextSite;
   }
 
   function saveAndOpenLanding() {
     const nextSite = saveSite();
-    router.push(`/site?u=${nextSite.username}`);
+    router.push(repairLandingPath(nextSite.username));
   }
 
   if (!canEdit) {
@@ -121,6 +124,7 @@ export default function SiteBuilderPage() {
               <EditorField label="Название на лендинге" value={draft.brandName} onChange={(value) => setDraft({ ...draft, brandName: value })} />
               <EditorField label="Юзернейм лендинга" value={draft.username} onChange={(value) => setDraft({ ...draft, username: slugifyLandingUsername(value, '') })} />
               <p className="rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-500">Публичный адрес: {publicLandingPath}</p>
+              {savedAt ? <p className="text-xs font-medium text-emerald-700">Сохранено в {savedAt}</p> : null}
               <EditorField label="Заголовок" value={draft.headline} onChange={(value) => setDraft({ ...draft, headline: value })} />
               <EditorArea label="Описание" value={draft.subheadline} onChange={(value) => setDraft({ ...draft, subheadline: value })} />
               <EditorField label="Фон hero, URL картинки" value={draft.heroImageUrl} onChange={(value) => setDraft({ ...draft, heroImageUrl: value })} />

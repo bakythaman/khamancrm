@@ -28,6 +28,7 @@ import { useToast } from '@/hooks/useToast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { isPlatformAdmin } from '@/lib/platform/admin';
 import { hasPermission } from '@/lib/permissions';
+import { repairLandingPath } from '@/lib/repair/platform';
 import type { Permission } from '@/lib/storage/types';
 import { cn } from '@/lib/utils';
 
@@ -105,7 +106,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <nav className="flex-1 space-y-1 px-3 py-3">
           {visibleNavItems.map((item) => {
-            const href = item.labelKey === 'navigation.repairSite' && repair?.site.username ? `/site?u=${repair.site.username}` : item.href;
+            const href = item.labelKey === 'navigation.repairSite' ? repairLandingPath(repair?.site.username) : item.href;
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
 

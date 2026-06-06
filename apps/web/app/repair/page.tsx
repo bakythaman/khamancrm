@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   Upload,
   UserCog,
+  UserPlus,
   Users,
   WalletCards,
 } from 'lucide-react';
@@ -40,12 +41,15 @@ import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { useAuth } from '@/hooks/useAuth';
 import { useCrmData } from '@/hooks/useCrmData';
+import { useResolvedMediaUrl } from '@/hooks/useResolvedMediaUrl';
 import { useToast } from '@/hooks/useToast';
 import { formatAmount } from '@/lib/i18n/format';
 import { createEmptyRepairData } from '@/lib/mock-data/seed';
+import { repairClientPath, repairLandingPath } from '@/lib/repair/platform';
 import { isRepairPortalRole } from '@/lib/repair/roles';
 import type {
   RepairChatAttachment,
+  RepairClient,
   RepairData,
   RepairMaterialStatus,
   RepairPaymentStatus,
@@ -54,12 +58,14 @@ import type {
   RepairStage,
   RepairTask,
 } from '@/lib/storage/types';
+import { saveMediaFile } from '@/lib/storage/media-store';
 
-type ModuleId = 'overview' | 'projects' | 'schedule' | 'tasks' | 'team' | 'chat' | 'documents' | 'finance' | 'materials' | 'reports' | 'analytics';
+type ModuleId = 'overview' | 'projects' | 'clients' | 'schedule' | 'tasks' | 'team' | 'chat' | 'documents' | 'finance' | 'materials' | 'reports' | 'analytics';
 
 const modules: { id: ModuleId; label: string; icon: LucideIcon; roles: string[] }[] = [
   { id: 'overview', label: 'Обзор', icon: LayoutDashboard, roles: ['owner', 'admin', 'manager', 'designer', 'foreman', 'worker'] },
   { id: 'projects', label: 'Проекты', icon: BriefcaseBusiness, roles: ['owner', 'admin', 'manager', 'designer', 'foreman', 'worker'] },
+  { id: 'clients', label: 'Клиенты', icon: UserPlus, roles: ['owner', 'admin', 'manager'] },
   { id: 'schedule', label: 'Календарь работ', icon: CalendarDays, roles: ['owner', 'admin', 'manager', 'designer', 'foreman', 'worker'] },
   { id: 'tasks', label: 'Задачи', icon: ClipboardList, roles: ['owner', 'admin', 'manager', 'designer', 'foreman', 'worker'] },
   { id: 'team', label: 'Команда', icon: UserCog, roles: ['owner', 'admin', 'manager', 'foreman'] },
@@ -90,6 +96,10 @@ function formatDate(value: string) {
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+}
+
+function normalizePhone(value: string) {
+  return value.replace(/\D/g, '');
 }
 
 function isoDate(date: Date) {
@@ -150,6 +160,8 @@ export default function RepairWorkPortalPage() {
   const [chatText, setChatText] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<RepairChatAttachment[]>([]);
   const [newChat, setNewChat] = useState({ title: '', projectId: '', memberIds: [] as string[] });
+  const [clientForm, setClientForm] = useState({ name: '', phone: '', email: '', whatsapp: '' });
+  const [clientProjectForm, setClientProjectForm] = useState({ clientId: '', projectId: '' });
   const [documentForm, setDocumentForm] = useState({ templateId: '', projectId: '', stageId: '', values: {} as Record<string, string> });
   const [paymentForm, setPaymentForm] = useState({ projectId: '', amount: '', date: todayIso(), type: 'этап' as (typeof paymentTypes)[number], status: 'оплачено' as RepairPaymentStatus });
   const [materialForm, setMaterialForm] = useState({ projectId: '', title: '', category: '', quantity: '', price: '', supplier: '', status: 'нужно купить' as RepairMaterialStatus });
@@ -288,12 +300,21 @@ export default function RepairWorkPortalPage() {
     const files = Array.from(event.target.files ?? []);
     if (!files.length) return;
     const media = await Promise.all(
-      files.slice(0, 12).map(async (file) => ({
-        id: crypto.randomUUID(),
-        type: file.type.startsWith('video/') ? ('video' as const) : ('image' as const),
-        url: await readFileAsDataUrl(file),
-        name: file.name,
-      })),
+      files.slice(0, 12).map(async (file) => {
+        let url: string;
+        try {
+          url = await saveMediaFile(file);
+        } catch {
+          url = await readFileAsDataUrl(file);
+        }
+
+        return {
+          id: crypto.randomUUID(),
+          type: file.type.startsWith('video/') ? ('video' as const) : ('image' as const),
+          url,
+          name: file.name,
+        };
+      }),
     );
     setReportForm((current) => ({ ...current, media: [...current.media, ...media] }));
     event.target.value = '';
@@ -344,6 +365,52 @@ export default function RepairWorkPortalPage() {
     }));
     setChatText('');
     setPendingAttachments([]);
+  }
+
+  function createClientAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = clientForm.name.trim();
+    const phone = clientForm.phone.trim();
+    const email = clientForm.email.trim().toLowerCase();
+    if (!name || !phone || !email) {
+      showToast('Укажите имя, телефон и почту клиента.', 'danger');
+      return;
+    }
+
+    const duplicate = data.clients.some(
+      (client) => client.email.trim().toLowerCase() === email || normalizePhone(client.phone) === normalizePhone(phone),
+    );
+    if (duplicate) {
+      showToast('Клиент с такой почтой или телефоном уже есть.', 'danger');
+      return;
+    }
+
+    const client: RepairClient = {
+      id: crypto.randomUUID(),
+      name,
+      phone,
+      whatsapp: clientForm.whatsapp.trim() || phone,
+      email,
+    };
+
+    updateRepairData((current) => ({ ...current, clients: [client, ...current.clients] }));
+    setClientForm({ name: '', phone: '', email: '', whatsapp: '' });
+    setClientProjectForm((current) => ({ ...current, clientId: client.id }));
+    showToast('Клиентский аккаунт создан');
+  }
+
+  function assignProjectToClient(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const clientId = clientProjectForm.clientId || data.clients[0]?.id;
+    const projectId = clientProjectForm.projectId || projectsForRole[0]?.id;
+    if (!clientId || !projectId) return;
+
+    updateRepairData((current) => ({
+      ...current,
+      projects: current.projects.map((project) => (project.id === projectId ? { ...project, clientId } : project)),
+    }));
+    setClientProjectForm({ clientId, projectId });
+    showToast('Проект привязан к клиенту');
   }
 
   function createDocument(event: FormEvent<HTMLFormElement>) {
@@ -509,7 +576,7 @@ export default function RepairWorkPortalPage() {
     <main className="min-h-screen bg-[#f5f1e8] text-neutral-950">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 border-r bg-white lg:flex lg:flex-col">
         <div className="flex h-20 items-center justify-between px-5">
-          <Link href={`/site?u=${data.site.username}`} className="text-2xl font-semibold">{data.site.brandName}</Link>
+          <Link href={repairLandingPath(data.site.username)} className="text-2xl font-semibold">{data.site.brandName}</Link>
           <Button size="icon" variant="ghost" onClick={logout} title="Выйти">
             <LogOut className="h-4 w-4" aria-hidden />
           </Button>
@@ -538,7 +605,7 @@ export default function RepairWorkPortalPage() {
         {!isRepairPortalRole(currentRole) ? (
           <div className="space-y-2 border-t p-4">
             <Button asChild variant="outline" className="w-full">
-              <Link href={`/site?u=${data.site.username}`}>Лендинг</Link>
+              <Link href={repairLandingPath(data.site.username)}>Лендинг</Link>
             </Button>
             <Button asChild className="w-full">
               <Link href="/dashboard">Khaman CRM</Link>
@@ -556,10 +623,10 @@ export default function RepairWorkPortalPage() {
             </div>
             <div className="flex flex-wrap gap-2">
               <Button asChild variant="outline">
-                <Link href="/client">Кабинет клиента</Link>
+                <Link href={repairClientPath(data.site.username)}>Кабинет клиента</Link>
               </Button>
               <Button asChild variant="outline">
-                <Link href={`/site?u=${data.site.username}`}>Лендинг</Link>
+                <Link href={repairLandingPath(data.site.username)}>Лендинг</Link>
               </Button>
               {!isRepairPortalRole(currentRole) ? (
                 <Button asChild>
@@ -652,6 +719,22 @@ export default function RepairWorkPortalPage() {
                 ) : null}
               </CardContent>
             </Card>
+          ) : null}
+
+          {active === 'clients' ? (
+            <ClientsPanel
+              clients={data.clients}
+              projects={projectsForRole}
+              clientById={clientById}
+              clientForm={clientForm}
+              clientProjectForm={clientProjectForm}
+              landingUsername={data.site.username}
+              onClientFormChange={setClientForm}
+              onClientProjectFormChange={setClientProjectForm}
+              onClientSubmit={createClientAccount}
+              onAssignSubmit={assignProjectToClient}
+              onOpenProject={openProject}
+            />
           ) : null}
 
           {active === 'schedule' ? (
@@ -1103,6 +1186,130 @@ function ChatBubble({ message, own }: { message: RepairData['chatMessages'][numb
   );
 }
 
+function ClientsPanel({
+  clients,
+  projects,
+  clientById,
+  clientForm,
+  clientProjectForm,
+  landingUsername,
+  onClientFormChange,
+  onClientProjectFormChange,
+  onClientSubmit,
+  onAssignSubmit,
+  onOpenProject,
+}: {
+  clients: RepairClient[];
+  projects: RepairProject[];
+  clientById: Map<string, RepairClient>;
+  clientForm: { name: string; phone: string; email: string; whatsapp: string };
+  clientProjectForm: { clientId: string; projectId: string };
+  landingUsername: string;
+  onClientFormChange: (form: { name: string; phone: string; email: string; whatsapp: string }) => void;
+  onClientProjectFormChange: (form: { clientId: string; projectId: string }) => void;
+  onClientSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onAssignSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onOpenProject: (projectId: string, module?: ModuleId) => void;
+}) {
+  const clientPath = repairClientPath(landingUsername);
+  const selectedClientId = clientProjectForm.clientId || clients[0]?.id || '';
+  const selectedProjectId = clientProjectForm.projectId || projects[0]?.id || '';
+
+  return (
+    <SimplePanel title="Клиенты и доступы">
+      <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+        <div className="space-y-4">
+          <form className="grid gap-3 rounded-lg border bg-white p-4" onSubmit={onClientSubmit}>
+            <div>
+              <p className="font-semibold">Создать клиентский аккаунт</p>
+              <p className="mt-1 text-sm text-neutral-500">Клиент входит с лендинга через кнопку “Кабинет клиента” и вводит эти данные.</p>
+            </div>
+            <Input placeholder="Имя клиента" value={clientForm.name} onChange={(event) => onClientFormChange({ ...clientForm, name: event.target.value })} />
+            <Input placeholder="Телефон" value={clientForm.phone} onChange={(event) => onClientFormChange({ ...clientForm, phone: event.target.value })} />
+            <Input placeholder="Почта" type="email" value={clientForm.email} onChange={(event) => onClientFormChange({ ...clientForm, email: event.target.value })} />
+            <Input placeholder="WhatsApp, если отличается" value={clientForm.whatsapp} onChange={(event) => onClientFormChange({ ...clientForm, whatsapp: event.target.value })} />
+            <Button type="submit">
+              <UserPlus className="h-4 w-4" aria-hidden />
+              Создать клиента
+            </Button>
+          </form>
+
+          <form className="grid gap-3 rounded-lg border bg-white p-4" onSubmit={onAssignSubmit}>
+            <div>
+              <p className="font-semibold">Привязать проект к клиенту</p>
+              <p className="mt-1 text-sm text-neutral-500">После привязки объект появится в личном кабинете этого клиента.</p>
+            </div>
+            <SelectInput value={selectedClientId} onChange={(event) => onClientProjectFormChange({ ...clientProjectForm, clientId: event.target.value })}>
+              {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+            </SelectInput>
+            <SelectInput value={selectedProjectId} onChange={(event) => onClientProjectFormChange({ ...clientProjectForm, projectId: event.target.value })}>
+              {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+            </SelectInput>
+            <Button type="submit" disabled={!clients.length || !projects.length}>Привязать проект</Button>
+          </form>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex flex-col gap-3 rounded-lg border bg-white p-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="font-semibold">Вход клиента с лендинга</p>
+              <p className="mt-1 text-sm text-neutral-500">Публичный путь: {clientPath}</p>
+            </div>
+            <Button asChild variant="outline">
+              <Link href={clientPath}>Открыть кабинет</Link>
+            </Button>
+          </div>
+
+          <div className="grid gap-3">
+            {clients.map((client) => {
+              const clientProjects = projects.filter((project) => project.clientId === client.id);
+              return (
+                <div key={client.id} className="rounded-lg border bg-white p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <p className="font-semibold">{client.name}</p>
+                      <p className="mt-1 text-sm text-neutral-500">{client.phone} · {client.email}</p>
+                    </div>
+                    <Badge tone={clientProjects.length ? 'green' : 'amber'}>{clientProjects.length} проект(а)</Badge>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {clientProjects.map((project) => (
+                      <button
+                        key={project.id}
+                        className="flex w-full items-center justify-between rounded-md bg-neutral-50 px-3 py-2 text-left text-sm hover:bg-neutral-100"
+                        type="button"
+                        onClick={() => onOpenProject(project.id, 'projects')}
+                      >
+                        <span>
+                          <span className="block font-medium">{project.title}</span>
+                          <span className="text-xs text-neutral-500">{project.address}</span>
+                        </span>
+                        <Badge>{project.progress}%</Badge>
+                      </button>
+                    ))}
+                    {!clientProjects.length ? <p className="rounded-md bg-neutral-50 p-3 text-sm text-neutral-500">Проект еще не привязан.</p> : null}
+                  </div>
+                </div>
+              );
+            })}
+            {!clients.length ? <p className="rounded-lg bg-white p-4 text-sm text-neutral-500">Создайте первого клиента для личного кабинета.</p> : null}
+          </div>
+
+          <div className="rounded-lg border bg-white p-4">
+            <p className="font-semibold">Проекты без клиента</p>
+            <div className="mt-3 space-y-2">
+              {projects.filter((project) => !clientById.has(project.clientId)).map((project) => (
+                <p key={project.id} className="rounded-md bg-neutral-50 p-3 text-sm">{project.title}</p>
+              ))}
+              {!projects.some((project) => !clientById.has(project.clientId)) ? <p className="text-sm text-neutral-500">Все проекты уже привязаны.</p> : null}
+            </div>
+          </div>
+        </div>
+      </div>
+    </SimplePanel>
+  );
+}
+
 function DocumentsPanel({
   data,
   selectedProjectId,
@@ -1438,13 +1645,26 @@ function reportMediaItems(report: RepairData['photoReports'][number]): RepairRep
 }
 
 function ReportMedia({ media, className }: { media: RepairReportMedia; className: string }) {
+  const src = useResolvedMediaUrl(media.url);
+
   if (media.type === 'video') {
-    return <video className={`${className} bg-neutral-950 object-cover`} controls src={media.url} title={media.name ?? 'Видео'} />;
+    return (
+      <div className={`${className} relative overflow-hidden bg-neutral-950`}>
+        {src ? <video className="h-full w-full object-cover" controls playsInline preload="metadata" src={src} title={media.name ?? 'Видео'} /> : null}
+        <span className="pointer-events-none absolute left-2 top-2 rounded bg-black/70 px-2 py-1 text-[11px] font-semibold text-white">
+          Видео{media.name ? ` · ${media.name}` : ''}
+        </span>
+      </div>
+    );
   }
 
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={media.url} alt={media.name ?? 'Фотоотчет'} className={`${className} object-cover`} />
+    src ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={src} alt={media.name ?? 'Фотоотчет'} className={`${className} object-cover`} />
+    ) : (
+      <div className={`${className} flex items-center justify-center bg-neutral-100 text-xs text-neutral-500`}>Файл сохранен</div>
+    )
   );
 }
 

@@ -188,7 +188,7 @@ export default function RegisterPage() {
                   value={form.repairSite.username}
                   onChange={(event) => setForm({ ...form, repairSite: { ...form.repairSite, username: slugifyLandingUsername(event.target.value, '') } })}
                 />
-                <span className="block text-xs text-neutral-500">Адрес будет: /site?u={form.repairSite.username || slugifyLandingUsername(form.companyName || 'company')}</span>
+                <span className="block text-xs text-neutral-500">Адрес будет: /{form.repairSite.username || slugifyLandingUsername(form.companyName || 'company')}</span>
               </label>
               <label className="space-y-2">
                 <span className="text-sm font-medium text-neutral-700">Главный заголовок</span>
