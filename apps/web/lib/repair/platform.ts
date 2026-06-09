@@ -82,7 +82,7 @@ export function repairLandingPath(username?: string | null) {
 
 export function repairClientPath(username?: string | null) {
   const slug = slugifyLandingUsername(username ?? '', '');
-  return slug ? `/client?u=${encodeURIComponent(slug)}` : '/client';
+  return slug ? `/${slug}/client` : '/client';
 }
 
 export function projectDuration(project: RepairProject) {

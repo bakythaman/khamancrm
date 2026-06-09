@@ -319,6 +319,7 @@ export function createGulviraRepairData(owner: User): RepairData {
         phone: '+7 701 555 10 20',
         whatsapp: '+7 701 555 10 20',
         email: 'aidar@example.kz',
+        password: 'client123',
       },
       {
         id: 'client-saule',
@@ -326,6 +327,7 @@ export function createGulviraRepairData(owner: User): RepairData {
         phone: '+7 707 333 90 12',
         whatsapp: '+7 707 333 90 12',
         email: 'saule@example.kz',
+        password: 'client123',
       },
     ],
     projects: [

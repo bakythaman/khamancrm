@@ -145,7 +145,7 @@ function normalizeRepairData(repair: Partial<RepairData> | undefined, companyNam
     ...fallback,
     ...(repair ?? {}),
     site,
-    clients: repair?.clients ?? [],
+    clients: (repair?.clients ?? []).map((client) => ({ ...client, password: client.password || 'client123' })),
     projects: repair?.projects ?? [],
     stages: repair?.stages ?? [],
     tasks: repair?.tasks ?? [],

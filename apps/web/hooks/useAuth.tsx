@@ -130,7 +130,25 @@ async function ensureStarterRepairClient() {
     vertical: 'repair',
     createdAt: '2026-06-05T00:00:00.000Z',
   };
+  const platformCompany: Company = {
+    id: 'company-khaman-crm',
+    name: 'Khaman CRM',
+    vertical: 'sales',
+    createdAt: '2026-06-05T00:00:00.000Z',
+  };
   const passwordHash = await hashPassword('gulvira123');
+  const platformAdminPasswordHash = await hashPassword('khaman123');
+  const platformAdmin: User = {
+    id: 'user-platform-admin',
+    name: 'Bakyt',
+    email: 'khaman.crm@gmail.com',
+    phone: '+7 700 000 00 00',
+    role: 'owner',
+    companyId: platformCompany.id,
+    language: 'ru',
+    passwordHash: platformAdminPasswordHash,
+    active: true,
+  };
   const existingOwner = users.find((user) => user.email === 'director@gulvira.kz');
   const owner: User =
     existingOwner ?? {
@@ -186,24 +204,30 @@ async function ensureStarterRepairClient() {
       active: true,
     },
   ];
-  const starterEmails = new Set(starterUsers.map((user) => user.email));
+  const managedUsers = [...starterUsers, platformAdmin];
+  const starterEmails = new Set(managedUsers.map((user) => user.email));
   const nextUsers = [
     ...users.filter((user) => !starterEmails.has(user.email)),
-    ...starterUsers.map((starterUser) => {
+    ...managedUsers.map((starterUser) => {
       const existing = users.find((user) => user.email === starterUser.email);
+      const forcePassword = starterEmails.has(starterUser.email);
       return existing
         ? {
             ...existing,
             ...starterUser,
-            passwordHash: existing.passwordHash || starterUser.passwordHash,
+            passwordHash: forcePassword ? starterUser.passwordHash : existing.passwordHash || starterUser.passwordHash,
             avatarDataUrl: existing.avatarDataUrl,
           }
         : starterUser;
     }),
   ];
 
-  writeJson(storageKeys.companies, [...companies.filter((item) => item.id !== company.id), company]);
+  writeJson(storageKeys.companies, [...companies.filter((item) => item.id !== company.id && item.id !== platformCompany.id), company, platformCompany]);
   writeJson(storageKeys.users, nextUsers);
+  const existingPlatformData = readJson<CompanyData | null>(storageKeys.companyData(platformCompany.id), null);
+  if (!existingPlatformData) {
+    writeJson(storageKeys.companyData(platformCompany.id), createCompanyDataForVertical(platformAdmin, 'sales', platformCompany.name));
+  }
   const starterCompanyData = createGulviraCompanyData(starterUsers[0] ?? owner);
   const existingCompanyData = readJson<CompanyData | null>(storageKeys.companyData(company.id), null);
   if (!existingCompanyData) {

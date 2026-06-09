@@ -225,6 +225,7 @@ export interface RepairClient {
   phone: string;
   whatsapp: string;
   email: string;
+  password?: string;
 }
 
 export interface RepairSiteService {

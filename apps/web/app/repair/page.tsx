@@ -160,7 +160,7 @@ export default function RepairWorkPortalPage() {
   const [chatText, setChatText] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<RepairChatAttachment[]>([]);
   const [newChat, setNewChat] = useState({ title: '', projectId: '', memberIds: [] as string[] });
-  const [clientForm, setClientForm] = useState({ name: '', phone: '', email: '', whatsapp: '' });
+  const [clientForm, setClientForm] = useState({ name: '', phone: '', email: '', whatsapp: '', password: '' });
   const [clientProjectForm, setClientProjectForm] = useState({ clientId: '', projectId: '' });
   const [documentForm, setDocumentForm] = useState({ templateId: '', projectId: '', stageId: '', values: {} as Record<string, string> });
   const [paymentForm, setPaymentForm] = useState({ projectId: '', amount: '', date: todayIso(), type: 'этап' as (typeof paymentTypes)[number], status: 'оплачено' as RepairPaymentStatus });
@@ -372,8 +372,13 @@ export default function RepairWorkPortalPage() {
     const name = clientForm.name.trim();
     const phone = clientForm.phone.trim();
     const email = clientForm.email.trim().toLowerCase();
-    if (!name || !phone || !email) {
-      showToast('Укажите имя, телефон и почту клиента.', 'danger');
+    const password = clientForm.password.trim();
+    if (!name || !phone || !email || !password) {
+      showToast('Укажите имя, телефон, почту и пароль клиента.', 'danger');
+      return;
+    }
+    if (password.length < 4) {
+      showToast('Пароль клиента должен быть минимум 4 символа.', 'danger');
       return;
     }
 
@@ -391,10 +396,11 @@ export default function RepairWorkPortalPage() {
       phone,
       whatsapp: clientForm.whatsapp.trim() || phone,
       email,
+      password,
     };
 
     updateRepairData((current) => ({ ...current, clients: [client, ...current.clients] }));
-    setClientForm({ name: '', phone: '', email: '', whatsapp: '' });
+    setClientForm({ name: '', phone: '', email: '', whatsapp: '', password: '' });
     setClientProjectForm((current) => ({ ...current, clientId: client.id }));
     showToast('Клиентский аккаунт создан');
   }
@@ -1202,10 +1208,10 @@ function ClientsPanel({
   clients: RepairClient[];
   projects: RepairProject[];
   clientById: Map<string, RepairClient>;
-  clientForm: { name: string; phone: string; email: string; whatsapp: string };
+  clientForm: { name: string; phone: string; email: string; whatsapp: string; password: string };
   clientProjectForm: { clientId: string; projectId: string };
   landingUsername: string;
-  onClientFormChange: (form: { name: string; phone: string; email: string; whatsapp: string }) => void;
+  onClientFormChange: (form: { name: string; phone: string; email: string; whatsapp: string; password: string }) => void;
   onClientProjectFormChange: (form: { clientId: string; projectId: string }) => void;
   onClientSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onAssignSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -1222,11 +1228,12 @@ function ClientsPanel({
           <form className="grid gap-3 rounded-lg border bg-white p-4" onSubmit={onClientSubmit}>
             <div>
               <p className="font-semibold">Создать клиентский аккаунт</p>
-              <p className="mt-1 text-sm text-neutral-500">Клиент входит с лендинга через кнопку “Кабинет клиента” и вводит эти данные.</p>
+              <p className="mt-1 text-sm text-neutral-500">Клиент входит с лендинга: в одну ячейку пишет почту или телефон, затем пароль.</p>
             </div>
             <Input placeholder="Имя клиента" value={clientForm.name} onChange={(event) => onClientFormChange({ ...clientForm, name: event.target.value })} />
             <Input placeholder="Телефон" value={clientForm.phone} onChange={(event) => onClientFormChange({ ...clientForm, phone: event.target.value })} />
             <Input placeholder="Почта" type="email" value={clientForm.email} onChange={(event) => onClientFormChange({ ...clientForm, email: event.target.value })} />
+            <Input placeholder="Пароль для клиента" value={clientForm.password} onChange={(event) => onClientFormChange({ ...clientForm, password: event.target.value })} />
             <Input placeholder="WhatsApp, если отличается" value={clientForm.whatsapp} onChange={(event) => onClientFormChange({ ...clientForm, whatsapp: event.target.value })} />
             <Button type="submit">
               <UserPlus className="h-4 w-4" aria-hidden />
@@ -1269,6 +1276,7 @@ function ClientsPanel({
                     <div>
                       <p className="font-semibold">{client.name}</p>
                       <p className="mt-1 text-sm text-neutral-500">{client.phone} · {client.email}</p>
+                      <p className="mt-1 text-xs font-medium text-neutral-700">Вход: почта или телефон · пароль: {client.password || 'client123'}</p>
                     </div>
                     <Badge tone={clientProjects.length ? 'green' : 'amber'}>{clientProjects.length} проект(а)</Badge>
                   </div>

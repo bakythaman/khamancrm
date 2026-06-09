@@ -30,6 +30,18 @@ function normalizePhone(value: string) {
   return value.replace(/\D/g, '');
 }
 
+function routeUsernameFromLocation() {
+  const queryUsername = new URLSearchParams(window.location.search).get('u');
+  if (queryUsername) return queryUsername;
+
+  const parts = window.location.pathname.split('/').filter(Boolean);
+  const clientIndex = parts.lastIndexOf('client');
+  const username = clientIndex > 0 ? parts[clientIndex - 1] : undefined;
+  if (username && username !== 'khamancrm') return decodeURIComponent(username);
+
+  return null;
+}
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(`${value}T00:00:00`));
 }
@@ -55,7 +67,7 @@ export default function RepairClientPortalPage() {
   const [publicPlatform, setPublicPlatform] = useState<RepairData | null>(null);
   const platform = publicPlatform ?? getPublicRepairData(company?.vertical === 'repair' ? repair : undefined, company?.name);
   const [clientId, setClientId] = useState<string | null>(null);
-  const [loginForm, setLoginForm] = useState({ name: '', phone: '', email: '' });
+  const [loginForm, setLoginForm] = useState({ identity: '', password: '' });
   const [loginError, setLoginError] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [question, setQuestion] = useState('');
@@ -64,8 +76,7 @@ export default function RepairClientPortalPage() {
   const landingPath = repairLandingPath(platform.site.username);
 
   useEffect(() => {
-    const username = new URLSearchParams(window.location.search).get('u');
-    setLandingUsername(username);
+    setLandingUsername(routeUsernameFromLocation());
   }, []);
 
   useEffect(() => {
@@ -107,19 +118,24 @@ export default function RepairClientPortalPage() {
 
   function login(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const email = loginForm.email.trim().toLowerCase();
-    const phone = normalizePhone(loginForm.phone);
-    const name = loginForm.name.trim();
-    if (!name || !email || !phone) {
-      setLoginError('Введите имя, телефон и почту, которые компания указала для вашего объекта.');
+    const identity = loginForm.identity.trim().toLowerCase();
+    const identityPhone = normalizePhone(identity);
+    const password = loginForm.password.trim();
+    if (!identity || !password) {
+      setLoginError('Введите почту или телефон и пароль от менеджера.');
       return;
     }
 
     const foundClient = platform.clients.find(
-      (item) => item.email.trim().toLowerCase() === email && [item.phone, item.whatsapp].some((value) => normalizePhone(value) === phone),
+      (item) => {
+        const identityMatches =
+          item.email.trim().toLowerCase() === identity ||
+          (!!identityPhone && [item.phone, item.whatsapp].some((value) => normalizePhone(value) === identityPhone));
+        return identityMatches && (item.password || 'client123') === password;
+      },
     );
     if (!foundClient) {
-      setLoginError('Клиент с такими данными не найден. Проверьте телефон и почту.');
+      setLoginError('Не получилось войти. Проверьте почту/телефон и пароль.');
       return;
     }
 
@@ -214,14 +230,13 @@ export default function RepairClientPortalPage() {
             <Card className="bg-white text-neutral-950">
               <CardHeader className="block">
                 <CardTitle className="text-xl">Войти как клиент</CardTitle>
-                <p className="mt-2 text-sm text-neutral-500">Введите имя, телефон и почту, которые ремонтная компания добавила к вашему объекту.</p>
+                <p className="mt-2 text-sm text-neutral-500">Введите почту или телефон в одно поле и пароль, который дал менеджер.</p>
               </CardHeader>
               <CardContent>
                 <form onSubmit={login} className="space-y-4">
                   {loginError ? <p className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">{loginError}</p> : null}
-                  <Input placeholder="Имя" value={loginForm.name} onChange={(event) => setLoginForm({ ...loginForm, name: event.target.value })} />
-                  <Input placeholder="Телефон" value={loginForm.phone} onChange={(event) => setLoginForm({ ...loginForm, phone: event.target.value })} />
-                  <Input placeholder="Почта" type="email" value={loginForm.email} onChange={(event) => setLoginForm({ ...loginForm, email: event.target.value })} />
+                  <Input placeholder="Почта или телефон" value={loginForm.identity} onChange={(event) => setLoginForm({ ...loginForm, identity: event.target.value })} />
+                  <Input placeholder="Пароль" type="password" value={loginForm.password} onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })} />
                   <Button type="submit" className="w-full">Открыть кабинет</Button>
                 </form>
               </CardContent>
